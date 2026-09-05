@@ -1,0 +1,1119 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>slidecast</title>
+<link rel="icon" href="/icon.svg">
+<style>
+  :root{--bg:#07080c;--panel:#0e1017;--line:rgba(255,255,255,.12);--text:#eef1f7;
+        --muted:#98a0b3;--orange:#ff7a1a;--orange2:#ff9a3d;--ok:#3ddc84;
+        --warn:#ffc24b;--bad:#ff5f56}
+  *{box-sizing:border-box}
+  [hidden]{display:none!important}
+  body{margin:0;background:var(--bg);color:var(--text);
+       font:14px/1.5 "Segoe UI",system-ui,sans-serif;padding:32px}
+  .wrap{max-width:960px;margin:0 auto}
+  h1{font-size:26px;font-weight:800;margin:0}
+  h1 span{color:var(--orange2)}
+  .brand{display:flex;align-items:center;gap:13px;margin-bottom:5px}
+  .brand .mark{width:42px;height:42px;flex:none;color:var(--text)}
+  .sub{color:var(--muted);margin:0 0 26px}
+  .panel{background:var(--panel);border:1px solid var(--line);border-radius:10px;
+         padding:20px;margin-bottom:16px}
+  .panel h2{font-size:12px;text-transform:uppercase;letter-spacing:.11em;
+            color:var(--orange2);margin:0 0 14px;font-weight:800}
+  label{display:block;font-size:12px;color:var(--muted);margin-bottom:5px}
+  input[type=file]{width:100%;padding:9px;background:#05060a;border:1px dashed var(--line);
+                   border-radius:6px;color:var(--muted);font-size:13px}
+  input[type=number],input[type=text],select{width:100%;padding:8px 10px;background:#05060a;
+      border:1px solid var(--line);border-radius:6px;color:var(--text);font-size:13px}
+  .grid{display:grid;gap:12px}
+  .g2{grid-template-columns:1fr 1fr}
+  .g3{grid-template-columns:repeat(3,1fr)}
+  .g4{grid-template-columns:repeat(4,1fr)}
+  .status{font-size:13px;padding:10px 12px;border-radius:6px;margin-top:12px;
+          border:1px solid var(--line);background:#05060a}
+  .status.ok{border-color:rgba(61,220,132,.45);color:var(--ok)}
+  .status.warn{border-color:rgba(255,194,75,.5);color:var(--warn)}
+  .status.bad{border-color:rgba(255,95,86,.45);color:var(--bad)}
+  .status + .status{margin-top:8px}
+  .btn{font-size:15px;font-weight:800;padding:13px 26px;border-radius:7px;cursor:pointer;
+       border:1px solid transparent;font-family:inherit}
+  .btn.primary{background:linear-gradient(135deg,var(--orange),var(--orange2));color:#120a03}
+  .btn.secondary{background:transparent;border-color:var(--line);color:var(--text)}
+  .btn:disabled{opacity:.45;cursor:not-allowed}
+  .mini{background:transparent;border:1px solid var(--line);color:var(--muted);
+        font-size:12px;font-weight:600;padding:6px 12px;border-radius:5px;cursor:pointer;
+        font-family:inherit;white-space:nowrap}
+  .mini:hover{color:var(--text);border-color:rgba(255,255,255,.3)}
+  .mini.danger:hover{color:var(--bad);border-color:rgba(255,95,86,.5)}
+  pre{background:#05060a;border:1px solid var(--line);border-radius:6px;padding:12px;
+      max-height:260px;overflow:auto;font-size:12px;color:var(--muted);margin:14px 0 0;
+      white-space:pre-wrap}
+  /* Fixed third column, not auto: an auto track collapses to zero width when the
+     Remove button is absent, which shifts every other row out of alignment. */
+  .asset{display:grid;grid-template-columns:1fr 1.3fr 92px;gap:10px;align-items:center;
+         margin-bottom:8px}
+  .asset code{color:var(--orange2);font-size:12px;word-break:break-all}
+  .asset .mini{width:100%}
+  .invisible{visibility:hidden}
+  .done{display:flex;align-items:center;gap:8px;padding:9px 10px;background:#05060a;
+        border:1px solid var(--line);border-radius:6px;font-size:12.5px}
+  .done .tick{color:var(--ok);flex:none}
+  .done .fname{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  /* Shows the subtitle as it will actually be burned in. */
+  .preview{margin-top:12px;border:1px solid var(--line);border-radius:6px;
+           background:#05060a;padding:22px 16px;text-align:center;overflow:hidden}
+  .preview .line{display:inline-block;white-space:nowrap;line-height:1.15}
+  video{width:100%;border-radius:8px;border:1px solid var(--line);margin-top:14px}
+  .row{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+  .hint{font-size:11.5px;color:var(--muted);margin-top:8px}
+  .chip{display:flex;align-items:center;gap:9px;margin-top:8px;padding:7px 10px;
+        background:#05060a;border:1px solid var(--line);border-radius:6px}
+  .chip .name{flex:1;font-size:12.5px;color:var(--text);word-break:break-all}
+  .chip .tick{color:var(--ok);flex:none}
+  /* modal */
+  .overlay{position:fixed;inset:0;background:rgba(3,4,7,.82);display:flex;
+           align-items:center;justify-content:center;padding:30px;z-index:50}
+  .modal{background:var(--panel);border:1px solid var(--line);border-radius:11px;
+         padding:22px;width:100%;max-width:860px;max-height:90vh;display:flex;
+         flex-direction:column}
+  .modal h3{margin:0 0 4px;font-size:18px;font-weight:800}
+  .modal .why{color:var(--muted);font-size:12.5px;margin:0 0 16px}
+  .modal textarea{flex:1;min-height:46vh;width:100%;background:#05060a;color:var(--text);
+      border:1px solid var(--line);border-radius:6px;padding:13px;resize:vertical;
+      font:12.5px/1.65 Consolas,"Cascadia Mono",monospace}
+  .modal .foot{display:flex;gap:10px;justify-content:flex-end;margin-top:16px;flex-wrap:wrap}
+  .check{background:#05060a;border:1px solid var(--line);border-radius:7px;padding:4px 0;
+         overflow:auto;max-height:52vh}
+  .check div{display:flex;gap:14px;padding:8px 14px;font-size:13px;
+             border-bottom:1px solid rgba(255,255,255,.05)}
+  .check div:last-child{border-bottom:0}
+  .check .k{color:var(--muted);width:172px;flex:none}
+  .check .v{color:var(--text);font-weight:600}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="brand">
+    <svg class="mark" viewBox="0 0 64 64" fill="none" aria-hidden="true">
+      <defs>
+        <linearGradient id="scWave" x1="0" y1="0" x2="1" y2="1">
+          <stop offset="0" stop-color="#ff7a1a"/><stop offset="1" stop-color="#ff9a3d"/>
+        </linearGradient>
+      </defs>
+      <rect x="5" y="21" width="30" height="22" rx="3.5"
+            stroke="currentColor" stroke-width="2.8"/>
+      <rect x="11" y="27" width="13" height="2.6" rx="1.3"
+            fill="currentColor" opacity="0.45"/>
+      <rect x="11" y="36.4" width="18" height="2.8" rx="1.4" fill="#ff9a3d"/>
+      <g stroke="url(#scWave)" stroke-width="3" stroke-linecap="round">
+        <path d="M 40.162 24.628 A 9 9 0 0 1 40.162 39.372"/>
+        <path d="M 44.177 18.894 A 16 16 0 0 1 44.177 45.106" opacity="0.66"/>
+        <path d="M 48.192 13.160 A 23 23 0 0 1 48.192 50.840" opacity="0.36"/>
+      </g>
+    </svg>
+    <h1>slide<span>cast</span></h1>
+  </div>
+  <p class="sub">Slide deck plus voiceover script in, finished MP4 out. Fades, timing and
+     subtitles are derived from the narration itself.</p>
+
+  <div class="panel">
+    <h2>1 &middot; Inputs</h2>
+    <div class="grid g2">
+      <div>
+        <label>Deck &mdash; video-presentation.html</label>
+        <input type="file" id="deck" accept=".html,.htm">
+        <div class="chip" id="deckChip" hidden>
+          <span class="tick">&#10003;</span>
+          <span class="name" id="deckName"></span>
+          <button class="mini danger" id="deckRemove">Remove</button>
+        </div>
+      </div>
+      <div>
+        <label>Voiceover &mdash; voiceover-kokoro.txt</label>
+        <input type="file" id="script" accept=".txt,.md">
+        <div class="chip" id="scriptChip" hidden>
+          <span class="tick">&#10003;</span>
+          <span class="name" id="scriptName"></span>
+          <button class="mini" id="scriptEdit">Edit</button>
+          <button class="mini danger" id="scriptRemove">Remove</button>
+        </div>
+      </div>
+    </div>
+    <div id="inspect"></div>
+  </div>
+
+  <div class="panel">
+    <h2>2 &middot; Screenshots</h2>
+    <div id="assets"></div>
+  </div>
+
+  <div class="panel">
+    <h2>3 &middot; Voice</h2>
+    <div class="grid g3">
+      <div><label>Kokoro voice</label><select id="voice"></select></div>
+      <div><label>Speed</label><input type="number" id="speed" value="1.0" step="0.05" min="0.5" max="2"></div>
+      <div><label>Kokoro URL</label><input type="text" id="kokoro" value="http://localhost:7860/tts/convert"></div>
+    </div>
+    <div class="grid g3" style="margin-top:12px">
+      <div><label>Send Kokoro</label>
+        <select id="chunk">
+          <option value="slide" selected>A whole slide at a time</option>
+          <option value="sentence">One sentence at a time</option>
+        </select></div>
+    </div>
+    <p class="hint">A whole slide lets Kokoro carry phrasing across sentences, which is how it
+       sounds when you paste a paragraph into its own UI. One sentence at a time makes every
+       sentence start cold, but pins each sentence boundary exactly without needing alignment.</p>
+    <div class="row" style="margin-top:12px">
+      <button class="mini" id="genVoice2" style="padding:10px 18px">Generate the voice</button>
+      <button class="mini" id="playVoice2" style="padding:10px 18px">Play the voice</button>
+    </div>
+    <div id="voiceStatus"></div>
+    <div id="voicePlayer"></div>
+    <div id="kokoroStatus"></div>
+  </div>
+
+  <div class="panel">
+    <h2>4 &middot; Music</h2>
+    <p class="hint" style="margin:-6px 0 15px">Judge the music against the real voice before
+       committing to a build. The voice is generated once and reused, so getting the level right
+       costs you nothing extra.</p>
+    <div class="grid g3">
+      <div><label>Choose a track</label>
+        <select id="musicPick"><option value="">None</option></select></div>
+      <div><label>Music level under the voice (dB)</label>
+        <input type="number" id="music_db" value="-20" step="0.5"></div>
+      <div><label>Or use your own</label>
+        <input type="file" id="musicFile" accept="audio/*"></div>
+    </div>
+    <div class="grid g3" style="margin-top:12px">
+      <div><label>&nbsp;</label>
+        <button class="mini danger" id="musicRemove" style="width:100%;padding:9px">Remove music</button></div>
+    </div>
+    <div class="chip" id="musicChip" hidden>
+      <span class="tick">&#10003;</span><span class="name" id="musicName"></span>
+    </div>
+    <div class="row" style="margin-top:14px">
+      <button class="mini" id="genVoice" style="padding:10px 18px">Generate the voice</button>
+      <button class="mini" id="previewMix" style="padding:10px 18px">Preview the mix</button>
+      <button class="mini" id="playTrack" style="padding:10px 18px">Play the track on its own</button>
+      <button class="mini" id="playVoice" style="padding:10px 18px">Play the voice</button>
+    </div>
+    <div id="musicLibNote"></div>
+    <div id="musicStatus"></div>
+    <div id="musicPlayer"></div>
+  </div>
+
+  <div class="panel">
+    <h2>5 &middot; Subtitles</h2>
+    <div class="grid g4">
+      <div><label>Font</label>
+        <select id="font" style="font-size:15px">
+          <option value="Arial" style="font-family:Arial;font-size:15px" selected>Arial</option>
+          <option value="Arial Black" style="font-family:'Arial Black', Arial;font-size:15px">Arial Black</option>
+          <option value="Segoe UI" style="font-family:'Segoe UI', Arial;font-size:15px">Segoe UI</option>
+          <option value="Verdana" style="font-family:Verdana, Arial;font-size:15px">Verdana</option>
+          <option value="Tahoma" style="font-family:Tahoma, Arial;font-size:15px">Tahoma</option>
+          <option value="Trebuchet MS" style="font-family:'Trebuchet MS', Arial;font-size:15px">Trebuchet MS</option>
+          <option value="Calibri" style="font-family:Calibri, Arial;font-size:15px">Calibri</option>
+          <option value="Bahnschrift" style="font-family:Bahnschrift, Arial;font-size:15px">Bahnschrift</option>
+          <option value="Century Gothic" style="font-family:'Century Gothic', Arial;font-size:15px">Century Gothic</option>
+          <option value="Franklin Gothic Medium" style="font-family:'Franklin Gothic Medium', Arial;font-size:15px">Franklin Gothic Medium</option>
+          <option value="Impact" style="font-family:Impact, Arial;font-size:15px">Impact</option>
+          <option value="Georgia" style="font-family:Georgia, serif;font-size:15px">Georgia</option>
+          <option value="Times New Roman" style="font-family:'Times New Roman', serif;font-size:15px">Times New Roman</option>
+          <option value="Palatino Linotype" style="font-family:'Palatino Linotype', serif;font-size:15px">Palatino Linotype</option>
+          <option value="Courier New" style="font-family:'Courier New', monospace;font-size:15px">Courier New</option>
+        </select></div>
+      <div><label>Size (px at 1080p)</label><input type="number" id="font_size" value="54"></div>
+      <div><label>Black outline</label><input type="number" id="outline" value="4"></div>
+      <div><label>Height off bottom</label><input type="number" id="margin_v" value="20"></div>
+    </div>
+    <div class="grid g3" style="margin-top:12px">
+      <div><label>Style</label>
+        <select id="preset">
+          <option value="white-black" selected>White with black borders</option>
+          <option value="white">Plain white</option>
+          <option value="black">Plain black</option>
+          <option value="black-white">Black with white borders</option>
+          <option value="red">Red</option>
+          <option value="blue">Blue</option>
+          <option value="green">Green</option>
+        </select></div>
+      <div><label>Highlight the spoken word</label>
+        <select id="highlight"><option value="0" selected>No</option>
+        <option value="1">Yes</option></select></div>
+      <div id="highlightColourWrap" hidden><label>Highlight colour</label>
+        <input type="color" id="highlight_colour" value="#ffd400"
+               style="height:36px;padding:3px"></div>
+    </div>
+    <div class="grid g3" style="margin-top:12px">
+      <div><label>Max characters per line</label><input type="number" id="max_chars" value="56"></div>
+      <div><label>Shortest line on screen (s)</label><input type="number" id="min_sub" value="0.9" step="0.1"></div>
+      <div><label>Bold</label>
+        <select id="bold"><option value="1">Yes</option><option value="0" selected>No</option></select></div>
+    </div>
+    <div id="subPreview"></div>
+    <div id="highlightNote"></div>
+    <p class="hint">Lines break at commas and full stops rather than on character count, and none
+       stays on screen for less than the shortest-line setting. Highlighting listens back to the
+       generated voice to find each word, which adds about half a minute to the first build.</p>
+  </div>
+
+  <div class="panel">
+    <h2>6 &middot; Pauses</h2>
+    <p class="hint" style="margin:-6px 0 15px">Every slide is held for exactly as long as its own
+       narration, so there is no slide length to set. These are only the silences around the speech.</p>
+    <div class="grid g4">
+      <div><label>Silence before first word (s)</label><input type="number" id="lead_in" value="0.6" step="0.1"></div>
+      <div><label>Pause between sentences (s)</label><input type="number" id="gap_sentence" value="0.28" step="0.02"></div>
+      <div><label>Pause between slides (s)</label><input type="number" id="gap_slide" value="1.1" step="0.1"></div>
+      <div><label>Silence after last word (s)</label><input type="number" id="tail" value="1.2" step="0.1"></div>
+    </div>
+    <p class="hint">The pause between sentences is pure pacing and nothing happens in it. The pause
+       between slides is where the fade to black lives, so the two settings are linked.</p>
+  </div>
+
+  <div class="panel">
+    <h2>7 &middot; Black fades</h2>
+    <p class="hint" style="margin:-6px 0 15px">The video fades in from black at the very start, fades
+       out to black at the very end, and fades out then back in between every pair of slides.</p>
+    <div class="grid g4">
+      <div><label>Fade to black length (s)</label><input type="number" id="fade" value="0.45" step="0.05"></div>
+    </div>
+    <div id="fadeNote"></div>
+  </div>
+
+  <div class="panel">
+    <h2>8 &middot; Build</h2>
+    <div class="grid g4" style="margin-bottom:16px">
+      <div><label>Frame rate (fps)</label><input type="number" id="fps" value="30"></div>
+      <div><label>Black fades in the MP4</label>
+        <select id="with_fades"><option value="1" selected>Yes</option>
+        <option value="0">No, do them in CapCut</option></select></div>
+    </div>
+    <div class="row">
+      <button class="btn primary" id="go" disabled>Build video</button>
+      <button class="btn secondary" id="dl" hidden>Download MP4</button>
+      <button class="btn secondary" id="dlsub" hidden>Download .srt</button>
+    </div>
+    <div id="resultNote"></div>
+    <pre id="log" hidden></pre>
+    <div id="player"></div>
+  </div>
+
+  <div class="panel" id="capcutPanel" hidden>
+    <h2>9 &middot; CapCut</h2>
+    <p class="hint" style="margin:-6px 0 15px">Hand the finished cut to CapCut as a real draft and
+       keep editing it there. The draft gets its own copy of the slides and voice, so building
+       again here will not break it.</p>
+    <div class="grid g3">
+      <div><label>Draft name</label>
+        <input type="text" id="capcut_name" value="slidecast"></div>
+      <div><label>If that name is taken</label>
+        <select id="capcut_overwrite">
+          <option value="0" selected>Make a new draft</option>
+          <option value="1">Overwrite it</option>
+        </select></div>
+      <div><label>&nbsp;</label>
+        <button class="btn secondary" id="capcut" style="width:100%">Send to CapCut</button></div>
+    </div>
+    <div id="capcutFolder"></div>
+  </div>
+</div>
+
+<!-- script editor -->
+<div class="overlay" id="editOverlay" hidden>
+  <div class="modal">
+    <h3>Edit voiceover script</h3>
+    <p class="why">Saving updates the script slidecast will use for this build. Your browser cannot
+       write back to the original file, so use Save and download to keep the change on disk.</p>
+    <textarea id="editBox" spellcheck="false"></textarea>
+    <div class="foot">
+      <button class="mini" id="editCancel">Cancel</button>
+      <button class="mini" id="editSaveFile">Save and download</button>
+      <button class="btn primary" id="editSave" style="font-size:14px;padding:10px 20px">Save</button>
+    </div>
+  </div>
+</div>
+
+
+<!-- the previous build is about to be replaced -->
+<div class="overlay" id="unsavedOverlay" hidden>
+  <div class="modal" style="max-width:620px">
+    <h3>The last video has not been saved</h3>
+    <p class="why">Building writes over it, and there is no copy anywhere else.</p>
+    <div class="check" id="unsavedDetail"></div>
+    <div class="foot">
+      <button class="mini" id="unsavedCancel">Cancel</button>
+      <button class="mini" id="unsavedDiscard">Build anyway and lose it</button>
+      <button class="btn primary" id="unsavedSave"
+              style="font-size:14px;padding:10px 20px">Download it, then build</button>
+    </div>
+  </div>
+</div>
+
+<!-- pre-flight confirmation -->
+<div class="overlay" id="confirmOverlay" hidden>
+  <div class="modal" style="max-width:660px">
+    <h3>Check this before building</h3>
+    <p class="why">A build takes a few minutes, most of it speech. Worth ten seconds now.</p>
+    <div class="check" id="checkList"></div>
+    <div id="confirmWarn"></div>
+    <div class="foot">
+      <button class="mini" id="confirmCancel">Go back</button>
+      <button class="btn primary" id="confirmGo" style="font-size:14px;padding:10px 20px">
+        Everything is correct, build it</button>
+    </div>
+  </div>
+</div>
+
+<script>
+const $ = id => document.getElementById(id);
+
+/* The subtitle looks on offer. width undefined means "use the box". */
+/* Bumped when a default changes for the better, so a saved session does not
+   quietly hold the old value. Settings older than this fall back to defaults. */
+const SETTINGS_VERSION = 5;
+
+const PRESETS = {
+  "white-black": {text: "#ffffff", outline: "#000000"},
+  "white":       {text: "#ffffff", outline: "#000000", width: 0},
+  "black":       {text: "#000000", outline: "#ffffff", width: 0},
+  "black-white": {text: "#000000", outline: "#ffffff"},
+  "red":         {text: "#ff3b30", outline: "#000000"},
+  "blue":        {text: "#3b8cff", outline: "#000000"},
+  "green":       {text: "#3ddc84", outline: "#000000"},
+};
+let deckText = "", scriptText = "", deckName = "", scriptName = "";
+let missing = [], assetFiles = {}, assetNames = {}, report = {};
+let restoring = false, saveTimer = null, kokoroOK = false, buildRunning = false;
+// The most recent build, and whether it has been downloaded.
+let lastResult = null;
+
+const voicesReady = fetch("/voices").then(r => r.json()).then(d => {
+  $("voice").innerHTML = d.voices.map(v =>
+    `<option${v === "af_sky" ? " selected" : ""}>${v}</option>`).join("");
+});
+
+/* Everything you picked is mirrored to the server, so a refresh - or a restart
+   of the server - does not throw away your inputs or an unsaved build. */
+function saveSession() {
+  if (restoring) return;
+  clearTimeout(saveTimer);
+  saveTimer = setTimeout(() => {
+    fetch("/session", {method: "POST", body: JSON.stringify(
+      {deckText, scriptText, deckName, scriptName, assetFiles, assetNames,
+       options: collectOptions()})}).catch(() => {});
+  }, 400);
+}
+
+document.addEventListener("change", e => {
+  if (e.target.matches("input:not([type=file]), select")) {
+    saveSession(); updateFadeNote(); updateHighlightNote(); updateSubPreview();
+  }
+});
+document.addEventListener("input", e => {
+  if (e.target.matches("#fade, #gap_slide")) updateFadeNote();
+});
+
+/* The fade lives inside the pause between slides, so the two panels are linked.
+   Show that relationship rather than only failing at build time. */
+/* 1080p subtitles shown at panel width, so the sample is the real proportion. */
+function updateSubPreview() {
+  const scale = Math.min(1, ($("subPreview").clientWidth || 880) / 1920);
+  const size = (parseFloat($("font_size").value) || 54) * scale;
+  const outline = (parseFloat($("outline").value) || 0) * scale;
+  const preset = PRESETS[$("preset").value] || {text: "#ffffff", outline: "#000000"};
+  const width = preset.width === undefined ? outline
+              : preset.width * scale;
+  const stroke = width > 0
+    ? `paint-order:stroke;-webkit-text-stroke:${(width * 2).toFixed(2)}px ${preset.outline}`
+    : "";
+  const hl = $("highlight").value === "1"
+    ? `<span style="color:${$("highlight_colour").value}">comparing</span>`
+    : "comparing";
+  $("subPreview").innerHTML =
+    `<div class="preview"><span class="line" style="font-family:${$("font").value};
+      font-size:${size.toFixed(1)}px;font-weight:${$("bold").value === "1" ? 700 : 400};
+      color:${preset.text};${stroke}">Today we're ${hl} two ways</span></div>`;
+}
+
+function updateHighlightNote() {
+  const on = $("highlight").value === "1";
+  $("highlightColourWrap").hidden = !on;
+  $("highlightNote").innerHTML = on
+    ? `<div class="status warn">Highlighting needs word-level timing, recovered by listening back
+       to the generated voice. That runs once and adds roughly half a minute to the build.</div>`
+    : "";
+}
+
+function updateFadeNote() {
+  const f = parseFloat($("fade").value), gap = parseFloat($("gap_slide").value);
+  if (isNaN(f) || isNaN(gap)) return;
+  const need = 2 * f;
+  const ok = gap >= need;
+  $("fadeNote").innerHTML = `<div class="status ${ok ? "ok" : "bad"}">
+    A ${f}s fade needs at least <b>${need.toFixed(2)}s</b> of pause between slides, so the black
+    lands in silence and never covers a word. Yours is <b>${gap}s</b>${ok ? "." :
+    " &mdash; raise it in Pauses, or shorten the fade."}</div>`;
+}
+
+const readText = f => new Promise(res => {
+  const r = new FileReader(); r.onload = () => res(r.result); r.readAsText(f);
+});
+const readData = f => new Promise(res => {
+  const r = new FileReader(); r.onload = () => res(r.result); r.readAsDataURL(f);
+});
+
+$("deck").onchange = async e => {
+  const f = e.target.files[0]; if (!f) return;
+  deckText = await readText(f); deckName = f.name;
+  assetFiles = {}; assetNames = {};
+  inspect();
+};
+$("script").onchange = async e => {
+  const f = e.target.files[0]; if (!f) return;
+  scriptText = await readText(f); scriptName = f.name;
+  inspect();
+};
+$("deckRemove").onclick = () => {
+  deckText = ""; deckName = ""; missing = []; assetFiles = {}; assetNames = {};
+  $("deck").value = ""; inspect();
+};
+$("scriptRemove").onclick = () => {
+  scriptText = ""; scriptName = ""; $("script").value = ""; inspect();
+};
+
+async function inspect() {
+  $("deckChip").hidden = !deckText;
+  $("scriptChip").hidden = !scriptText;
+  $("deckName").textContent = deckName;
+  $("scriptName").textContent = scriptName;
+
+  if (!deckText) {
+    report = {}; missing = []; renderAssets();
+    $("inspect").innerHTML = ""; $("go").disabled = true;
+    return;
+  }
+  const r = await fetch("/inspect", {method: "POST",
+    body: JSON.stringify({deck: deckText, script: scriptText})}).then(r => r.json());
+  report = r;
+  missing = r.missing || [];
+  renderAssets();
+
+  const notes = [];
+  let ready = false;
+  if (!scriptText) {
+    notes.push(["", `Deck has <b>${r.slides}</b> slides. Now add the voiceover script.`]);
+  } else if (r.slides !== r.script_slides) {
+    notes.push(["bad", `Mismatch: the deck has <b>${r.slides}</b> slides but the script describes
+                        <b>${r.script_slides}</b>. Fix one of them before building.`]);
+  } else {
+    const total = (r.sentences || []).reduce((a, b) => a + b, 0);
+    notes.push(["ok", `<b>${r.slides}</b> slides matched, <b>${total}</b> sentences to speak.` +
+      (missing.length ? ` ${missing.length} screenshot(s) still needed.` : "")]);
+    ready = true;
+  }
+  if (scriptText && !r.has_markup) {
+    notes.push(["warn", `This script has <b>no Kokoro markup</b>, so it looks like the plain
+      <code>voiceover-script.md</code>. It will build, but Kokoro will read <b>dbt</b> as a word and
+      mispronounce <b>AI</b>, <b>query</b> and <b>status</b>. Upload
+      <code>voiceover-kokoro.txt</code> instead.`]);
+  }
+  $("inspect").innerHTML = notes.map(([c, h]) =>
+    `<div class="status ${c}">${h}</div>`).join("");
+  $("go").disabled = !ready;
+  saveSession();
+}
+
+function renderAssets() {
+  if (!deckText) {
+    $("assets").innerHTML =
+      `<p class="hint">Load a deck to see whether any of its images need supplying.</p>`;
+    return;
+  }
+  if (!missing.length) {
+    $("assets").innerHTML =
+      `<p class="hint">Every image the deck references resolved on its own. Nothing to upload.</p>`;
+    return;
+  }
+  $("assets").innerHTML =
+    `<p class="hint" style="margin:-4px 0 12px">The deck points at these files but they are not
+      next to it. Pick each one from your disk.</p>` +
+    missing.map(name => {
+      const have = !!assetFiles[name];
+      // Re-rendering resets a file input to "No file chosen", so once a file is
+      // supplied show its name instead of an input that looks empty.
+      const picker = have
+        ? `<div class="done"><span class="tick">&#10003;</span>
+             <span class="fname">${assetNames[name] || "added"}</span></div>`
+        : `<input type="file" data-name="${name}" class="af" accept="image/*">`;
+      return `<div class="asset">
+        <code>${name}</code>
+        ${picker}
+        <button class="mini danger ar${have ? "" : " invisible"}"
+                data-name="${name}">Remove</button>
+      </div>`;
+    }).join("");
+
+  document.querySelectorAll(".af").forEach(el => {
+    el.onchange = async e => {
+      const f = e.target.files[0];
+      if (!f) return;
+      assetFiles[el.dataset.name] = await readData(f);
+      assetNames[el.dataset.name] = f.name;
+      renderAssets();
+      saveSession();
+    };
+  });
+  document.querySelectorAll(".ar").forEach(el => {
+    el.onclick = () => {
+      delete assetFiles[el.dataset.name];
+      delete assetNames[el.dataset.name];
+      renderAssets();
+      saveSession();
+    };
+  });
+}
+
+/* ---- script editor ---- */
+$("scriptEdit").onclick = () => {
+  $("editBox").value = scriptText;
+  $("editOverlay").hidden = false;
+};
+$("editCancel").onclick = () => { $("editOverlay").hidden = true; };
+$("editSave").onclick = () => {
+  scriptText = $("editBox").value;
+  $("editOverlay").hidden = true;
+  inspect();
+};
+$("editSaveFile").onclick = () => {
+  scriptText = $("editBox").value;
+  const blob = new Blob([scriptText], {type: "text/plain;charset=utf-8"});
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = scriptName || "voiceover-kokoro.txt";
+  a.click();
+  URL.revokeObjectURL(a.href);
+  $("editOverlay").hidden = true;
+  inspect();
+};
+
+/* ---- build, behind a pre-flight check ---- */
+const num = id => parseFloat($(id).value);
+
+function collectOptions() {
+  return {
+    voice: $("voice").value, speed: num("speed"), kokoro: $("kokoro").value,
+    lead_in: num("lead_in"), tail: num("tail"), gap_sentence: num("gap_sentence"),
+    gap_slide: num("gap_slide"), fade: num("fade"), fps: num("fps"),
+    font: $("font").value, font_size: num("font_size"), outline: num("outline"),
+    margin_v: num("margin_v"), max_chars: num("max_chars"), min_sub: num("min_sub"),
+    with_fades: $("with_fades").value === "1",
+    music_db: num("music_db"),
+    chunk: $("chunk").value,
+    text_colour: PRESETS[$("preset").value].text,
+    outline_colour: PRESETS[$("preset").value].outline,
+    outline: PRESETS[$("preset").value].width === undefined
+             ? num("outline") : PRESETS[$("preset").value].width,
+    v: SETTINGS_VERSION,
+    preset: $("preset").value,
+    highlight: $("highlight").value === "1",
+    highlight_colour: $("highlight_colour").value,
+    bold: $("bold").value === "1"
+  };
+}
+
+/* Building overwrites workspace/video.mp4. If the last one was never
+   downloaded, it is gone for good, so ask before spending the render. */
+function preflight() {
+  const o = collectOptions();
+  const sentences = (report.sentences || []).reduce((a, b) => a + b, 0);
+  const supplied = Object.keys(assetFiles).length;
+  const rows = [
+    ["Deck", `${deckName} &mdash; ${report.slides} slides`],
+    ["Script", `${scriptName} &mdash; ${sentences} sentences to speak`],
+    ["Screenshots", missing.length
+        ? `${supplied} of ${missing.length} supplied` : "all resolved automatically"],
+    ["Voice", `${o.voice} at ${o.speed}&times; speed`],
+    ["Kokoro", kokoroOK ? "running and answering"
+                        : "not answering &mdash; slidecast will try to start it"],
+    ["Subtitles", `${o.font} ${o.font_size}px, outline ${o.outline}, ${o.margin_v}px off the bottom`],
+    ["Pause between slides", `${o.gap_slide}s, with a ${o.fade}s fade to black inside it`]
+  ];
+  $("checkList").innerHTML = rows.map(([k, v]) =>
+    `<div><span class="k">${k}</span><span class="v">${v}</span></div>`).join("");
+
+  const warns = [];
+  if (!report.has_markup)
+    warns.push("The script has no Kokoro markup. Pronunciation will be wrong.");
+  if (!kokoroOK)
+    warns.push("Kokoro is not answering yet. The build will try to start it first, which can "
+             + "take a minute or two if Docker Desktop has to launch.");
+  if (missing.length && supplied < missing.length)
+    warns.push(`${missing.length - supplied} screenshot(s) are still missing and those slides
+                will render with a broken image.`);
+  if (o.gap_slide < 2 * o.fade)
+    warns.push("The pause between slides is less than twice the fade length, so the fade to black "
+             + "will cover speech.");
+  $("confirmWarn").innerHTML = warns.map(w =>
+    `<div class="status warn">${w}</div>`).join("");
+
+  $("confirmOverlay").hidden = false;
+}
+
+$("go").onclick = () => {
+  if (lastResult && lastResult.duration && !lastResult.saved) {
+    const t = lastResult.duration;
+    $("unsavedDetail").innerHTML =
+      `<div><span class="k">Not saved</span><span class="v">${describe(lastResult)}</span></div>` +
+      `<div><span class="k">Where it is</span><span class="v">workspace/video.mp4</span></div>`;
+    $("unsavedOverlay").hidden = false;
+    return;
+  }
+  preflight();
+};
+
+$("unsavedCancel").onclick = () => { $("unsavedOverlay").hidden = true; };
+$("unsavedDiscard").onclick = () => { $("unsavedOverlay").hidden = true; preflight(); };
+$("unsavedSave").onclick = () => {
+  saveVideo();
+  $("unsavedOverlay").hidden = true;
+  // Give the download a moment to start before the build overwrites the file.
+  setTimeout(preflight, 1200);
+};
+
+$("confirmCancel").onclick = () => { $("confirmOverlay").hidden = true; };
+$("confirmGo").onclick = async () => {
+  $("confirmOverlay").hidden = true;
+  buildRunning = true;
+  $("go").disabled = true;
+  $("log").hidden = false;
+  $("log").textContent = "starting\n";
+  $("player").innerHTML = "";
+  $("resultNote").innerHTML = "";
+  $("dl").hidden = $("dlsub").hidden = true;
+  $("capcutPanel").hidden = true;
+  await fetch("/build", {method: "POST",
+    body: JSON.stringify({deck: deckText, script: scriptText,
+                          assets: assetFiles, options: collectOptions()})});
+  poll();
+};
+
+function describe(r) {
+  const t = r.duration;
+  return `${Math.floor(t / 60)}m ${(t % 60).toFixed(1)}s, ${r.slides} slides, ` +
+         `${r.subtitles} subtitle lines`;
+}
+
+function showResult(r, fromEarlier) {
+  lastResult = r;
+  $("player").innerHTML = `<video controls src="/video?t=${Date.now()}"></video>`;
+  $("dl").hidden = $("dlsub").hidden = false;
+  $("capcutPanel").hidden = false;
+  $("resultNote").innerHTML = fromEarlier
+    ? `<div class="status ok">A finished video is still here from an earlier build &mdash;
+       ${describe(r)}. It stays until you build again, so you cannot lose it by refreshing.</div>`
+    : "";
+}
+
+function poll() {
+  const timer = setInterval(async () => {
+    const s = await fetch("/status").then(r => r.json());
+    $("log").textContent = s.log.join("\n");
+    $("log").scrollTop = $("log").scrollHeight;
+    if (!s.running) {
+      clearInterval(timer);
+      buildRunning = false;
+      $("go").disabled = false;
+      if (s.error) {
+        $("log").textContent += "\n\n" + s.error;
+      } else if (s.result) {
+        $("log").textContent += "\n\n" + describe(s.result) + ".";
+        showResult({...s.result, saved: false}, false);
+      }
+    }
+  }, 700);
+}
+
+async function refreshCapcutFolder() {
+  const s = await fetch("/capcut/folder").then(r => r.json()).catch(() => ({}));
+  const change = ` <button class="mini" id="pickFolder" style="margin-left:8px">Change</button>`;
+  if (s.drafts && s.exists) {
+    const warn = s.index ? "" :
+      " &mdash; no CapCut index found beside it, so the draft is written but will not be listed";
+    $("capcutFolder").innerHTML =
+      `<div class="status ${s.index ? "ok" : "warn"}">CapCut drafts folder:
+        <b>${s.drafts}</b>${warn}${change}</div>`;
+  } else {
+    $("capcutFolder").innerHTML =
+      `<div class="status bad">No CapCut drafts folder found. Point at it to enable
+        Send to CapCut.${change}</div>`;
+  }
+  $("pickFolder").onclick = pickCapcutFolder;
+  $("capcutFolder").insertAdjacentHTML("beforeend", FOLDER_HELP);
+}
+
+/* Which folder to point at, since CapCut moved it between versions. */
+const FOLDER_HELP = `<p class="hint">slidecast reads this from CapCut itself, so you should not
+  normally need to change it. If you do: point at the folder that <b>contains one folder per
+  project</b>, not at a single project. CapCut creates
+  <code>User Data / Projects / com.lveditor.draft</code> and keeps drafts there by default; if you
+  have pointed CapCut at your own location the drafts live there instead, and that is the one to
+  pick.</p>`;
+
+async function pickCapcutFolder() {
+  $("capcutFolder").innerHTML =
+    `<div class="status warn">A folder chooser is open &mdash; it may be behind this window.
+     Pick the folder your CapCut drafts live in.</div>`;
+  const r = await fetch("/capcut/folder", {method: "POST", body: "{}"})
+    .then(x => x.json()).catch(() => ({ok: false, error: "The chooser failed to open."}));
+  if (!r.ok && r.error) {
+    $("capcutFolder").innerHTML = `<div class="status bad">${r.error}</div>`;
+    setTimeout(refreshCapcutFolder, 3000);
+    return;
+  }
+  refreshCapcutFolder();
+}
+
+$("capcut").onclick = async () => {
+  const btn = $("capcut"), name = $("capcut_name").value || "slidecast";
+  btn.disabled = true;
+  btn.textContent = "Writing draft…";
+  const r = await fetch("/capcut", {method: "POST", body: JSON.stringify(
+    {name, with_fades: $("with_fades").value === "1",
+     overwrite: $("capcut_overwrite").value === "1",
+     music_db: num("music_db")})})
+    .then(x => x.json()).catch(() => ({ok: false, error: "The request failed."}));
+  btn.disabled = false;
+  btn.textContent = "Send to CapCut";
+  if (!r.ok) {
+    $("resultNote").innerHTML =
+      `<div class="status bad">${r.error || "Could not write the draft."}</div>`;
+    return;
+  }
+  const renamed = r.name && r.name !== name;
+  $("resultNote").innerHTML =
+    `<div class="status ${renamed ? "warn" : "ok"}">CapCut draft written as
+      <b>${r.name || name}</b>.${renamed
+        ? ` A draft called <b>${name}</b> already existed, so this one was given a new name rather
+            than replacing it.`
+        : (r.overwritten ? " It replaced the draft that had that name." : "")}
+      Its media is copied into the draft, so rebuilding here will not break it.</div>`;
+};
+
+/* ---- music: judge it against the real voice before building ---- */
+
+function musicNote(cls, html) {
+  $("musicStatus").innerHTML = `<div class="status ${cls}">${html}</div>`;
+}
+
+$("musicFile").onchange = async e => {
+  const f = e.target.files[0];
+  if (!f) return;
+  musicNote("", `Uploading ${f.name}…`);
+  const data = await readData(f);
+  const r = await fetch("/music", {method: "POST",
+    body: JSON.stringify({name: f.name, data})}).then(x => x.json());
+  $("musicFile").value = "";
+  refreshMusic();
+  musicNote("ok", `<b>${r.name}</b> loaded. Generate the voice, then preview the mix.`);
+};
+
+$("musicRemove").onclick = async () => {
+  await fetch("/music/clear", {method: "POST", body: "{}"});
+  $("musicPlayer").innerHTML = "";
+  musicNote("", "Music removed. The build will use the voice alone.");
+  refreshMusic();
+};
+
+async function refreshMusic() {
+  const lib = await fetch("/music/library").then(r => r.json()).catch(() => ({tracks: []}));
+  const s = await fetch("/music/state").then(r => r.json()).catch(() => ({}));
+  const pick = $("musicPick");
+  pick.innerHTML = `<option value="">None</option>` +
+    (lib.tracks || []).map(f => {
+      const label = f.replace(/\.[^.]+$/, "");
+      const sel = s.name === f ? " selected" : "";
+      return `<option value="${f}"${sel}>${label}</option>`;
+    }).join("");
+  // A track that was uploaded rather than picked from the library.
+  if (s.name && !(lib.tracks || []).includes(s.name)) {
+    pick.insertAdjacentHTML("beforeend",
+      `<option value="" selected>${s.name} (uploaded)</option>`);
+  }
+  $("musicChip").hidden = !s.name;
+  $("musicName").textContent = s.name || "";
+  $("musicLibNote").innerHTML = (lib.tracks || []).length
+    ? `<p class="hint">These beds are generated by slidecast, so there is no licence to worry
+       about. They are plain on purpose &mdash; meant to sit under a voice, not to be listened to.
+       Drop your own files in <code>${lib.folder}</code> and they appear here too.</p>`
+    : `<p class="hint">No tracks in the library yet. Put audio files in
+       <code>${lib.folder}</code> and they will appear here.</p>`;
+  return s;
+}
+
+$("musicPick").onchange = async e => {
+  const name = e.target.value;
+  if (!name) return;
+  musicNote("", `Loading ${name}…`);
+  const r = await fetch("/music/pick", {method: "POST", body: JSON.stringify({name})})
+    .then(x => x.json()).catch(() => ({ok: false, error: "Could not load that track."}));
+  await refreshMusic();
+  musicNote(r.ok ? "ok" : "bad", r.ok
+    ? `<b>${r.name}</b> loaded. Generate the voice if you have not, then preview the mix.`
+    : (r.error || "Could not load that track."));
+  $("musicPlayer").innerHTML = "";
+};
+
+/* The same two actions live in the Voice panel and the Music panel, writing
+   into whichever status/player belongs to the button that was pressed. */
+function voiceUI(fromVoicePanel) {
+  return fromVoicePanel
+    ? {note: (c, h) => { $("voiceStatus").innerHTML = `<div class="status ${c}">${h}</div>`; },
+       player: "voicePlayer", buttons: ["genVoice2", "playVoice2"]}
+    : {note: musicNote, player: "musicPlayer", buttons: ["genVoice", "playTrack", "playVoice"]};
+}
+
+async function generateVoice(ui) {
+  if (!scriptText) return ui.note("bad", "Load the voiceover script first.");
+  buildRunning = true;
+  ui.buttons.forEach(b => { if ($(b)) $(b).disabled = true; });
+  ui.note("warn", `Generating the voice with Kokoro. This takes a couple of minutes for a full
+     script, but only once &mdash; the build afterwards reuses it.`);
+  await fetch("/voice", {method: "POST", body: JSON.stringify(
+    {script: scriptText, options: collectOptions()})});
+  const timer = setInterval(async () => {
+    const s = await fetch("/status").then(r => r.json());
+    const last = s.log[s.log.length - 1] || "";
+    if (s.running) {
+      ui.note("warn", `Generating the voice&hellip; <span style="opacity:.75">${last}</span>`);
+      return;
+    }
+    clearInterval(timer);
+    buildRunning = false;
+    ui.buttons.forEach(b => { if ($(b)) $(b).disabled = false; });
+    if (s.error) return ui.note("bad", s.error);
+    ui.note("ok", s.result && s.result.cached
+      ? "That voice was already generated."
+      : "Voice ready. It will be reused by the next build.");
+    refreshMusic();
+  }, 800);
+}
+
+async function playVoice(ui) {
+  const s = await fetch("/music/state").then(r => r.json()).catch(() => ({}));
+  if (!s.voice_ready) return ui.note("bad", "Generate the voice first.");
+  ui.note("ok", "Playing the generated voice on its own, with no music under it.");
+  $(ui.player).innerHTML =
+    `<audio controls autoplay style="width:100%;margin-top:12px"
+       src="/voice/file?t=${Date.now()}"></audio>`;
+}
+
+$("genVoice2").onclick = () => generateVoice(voiceUI(true));
+$("playVoice2").onclick = () => playVoice(voiceUI(true));
+$("playVoice").onclick = () => playVoice(voiceUI(false));
+
+$("genVoice").onclick = async () => {
+  if (!scriptText) return musicNote("bad", "Load the voiceover script first.");
+  $("genVoice").disabled = true;
+  musicNote("warn", `Generating the voice with Kokoro. It speaks one sentence at a time, so
+     this takes a couple of minutes for a full script &mdash; but only once. The build afterwards
+     reuses it.`);
+  await fetch("/voice", {method: "POST", body: JSON.stringify(
+    {script: scriptText, options: collectOptions()})});
+  const timer = setInterval(async () => {
+    const s = await fetch("/status").then(r => r.json());
+    const last = s.log[s.log.length - 1] || "";
+    if (s.running) {
+      musicNote("warn", `Generating the voice&hellip; <span style="opacity:.75">${last}</span>`);
+      return;
+    }
+    clearInterval(timer);
+    $("genVoice").disabled = false;
+    if (s.error) return musicNote("bad", s.error);
+    musicNote("ok", s.result && s.result.cached
+      ? "That voice was already generated. Preview the mix."
+      : "Voice ready. Preview the mix, then adjust the level until you like it.");
+    refreshMusic();
+  }, 800);
+};
+
+$("playTrack").onclick = async () => {
+  const s = await fetch("/music/state").then(r => r.json()).catch(() => ({}));
+  if (!s.name) return musicNote("bad", "No track loaded. Choose one or load your own first.");
+  musicNote("ok", `Playing <b>${s.name}</b> end to end, at full volume &mdash; this is the track
+     itself, not the mix.`);
+  $("musicPlayer").innerHTML =
+    `<audio controls autoplay style="width:100%;margin-top:12px"
+       src="/music/file?t=${Date.now()}"></audio>`;
+};
+
+$("previewMix").onclick = async () => {
+  $("previewMix").disabled = true;
+  musicNote("warn", "Mixing…");
+  const r = await fetch("/preview", {method: "POST",
+    body: JSON.stringify({music_db: num("music_db")})})
+    .then(x => x.json()).catch(() => ({ok: false, error: "The request failed."}));
+  $("previewMix").disabled = false;
+  if (!r.ok) return musicNote("bad", r.error || "Could not mix.");
+  if (!r.music) {
+    musicNote("ok", "No music loaded, so this is the voice on its own.");
+  } else {
+    const u = r.under;
+    let verdict = "";
+    if (u !== null && u !== undefined) {
+      verdict = u > 25
+        ? ` That puts it <b>${u} dB</b> under the voice, which is probably too quiet to hear.`
+        : (u < 6
+            ? ` That puts it only <b>${u} dB</b> under the voice, loud enough to fight it.`
+            : ` That puts it <b>${u} dB</b> under the voice, which sits well as a bed.`);
+    }
+    musicNote(u > 25 || u < 6 ? "warn" : "ok",
+      `Mixed at <b>${r.db} dB</b>.${verdict} Change the level and preview again; the build uses
+       whatever is in the box.`);
+  }
+  $("musicPlayer").innerHTML =
+    `<audio controls style="width:100%;margin-top:12px" src="/preview.mp3?t=${Date.now()}"></audio>`;
+};
+
+/* Re-check on a timer, on refocus, and when the tab becomes visible again.
+   Skipped while a build or voice job is running: Kokoro is plainly up then,
+   and the Docker probe is slow enough to be worth not repeating. */
+setInterval(() => {
+  if (!document.hidden && !buildRunning) refreshKokoro(true);
+}, 6000);
+document.addEventListener("visibilitychange", () => {
+  if (!document.hidden && !buildRunning) refreshKokoro(true);
+});
+window.addEventListener("focus", () => { if (!buildRunning) refreshKokoro(true); });
+
+function saveVideo() {
+  // ?save=1 is how the server tells a real download from the player loading it.
+  location.href = "/video?save=1";
+  if (lastResult) lastResult.saved = true;
+}
+
+$("dl").onclick = saveVideo;
+$("dlsub").onclick = () => location.href = "/subs";
+
+/* Kokoro lives in Docker. Show whether it is up, and offer to start it, rather
+   than letting a build discover it minutes in. */
+let kokoroChecking = false, lastKokoroCheck = 0;
+
+/* Kokoro can go away underneath us - quitting Docker is enough - so the panel
+   re-checks on a timer and whenever this tab is looked at again. `quiet` skips
+   the placeholder so a background check does not make the panel flicker. */
+async function refreshKokoro(quiet) {
+  if (kokoroChecking) return;
+  // When Kokoro answers the check is a cheap ping and Docker is never asked,
+  // so poll often and notice a disconnect quickly. When it is down the check
+  // costs about 5s of `docker info`, so back right off. An explicit check
+  // (not quiet) always goes through.
+  const wait = kokoroOK ? 5000 : 55000;
+  if (quiet && Date.now() - lastKokoroCheck < wait) return;
+  kokoroChecking = true;
+  lastKokoroCheck = Date.now();
+  try {
+    await checkKokoroOnce(quiet);
+  } finally {
+    kokoroChecking = false;
+  }
+}
+
+async function checkKokoroOnce(quiet) {
+  // Asking Docker takes a few seconds when Kokoro is down, so say so meanwhile.
+  if (!quiet) $("kokoroStatus").innerHTML = `<div class="status">Checking Kokoro&hellip;</div>`;
+  const s = await fetch("/kokoro").then(r => r.json()).catch(() => ({api: false}));
+  kokoroOK = !!s.api;
+  if (s.api) {
+    $("kokoroStatus").innerHTML =
+      `<div class="status ok">Kokoro is running and answering.</div>`;
+    return;
+  }
+  const why = s.docker === false
+    ? "Kokoro is not answering, and Docker is not running either."
+    : (s.container === "missing"
+        ? "Kokoro is not answering, and the kokoro-ui container does not exist yet."
+        : "Kokoro is not answering. The container is not started.");
+  $("kokoroStatus").innerHTML =
+    `<div class="status bad">${why}
+       <button class="mini" id="kokoroStart" style="margin-left:10px">Start Kokoro</button></div>`;
+  $("kokoroStart").onclick = startKokoro;
+}
+
+async function startKokoro() {
+  $("kokoroStatus").innerHTML = `<div class="status warn">Starting Kokoro. If Docker Desktop
+     has to launch too this can take a minute or two.</div>`;
+  const r = await fetch("/kokoro/start", {method: "POST", body: "{}"})
+    .then(r => r.json()).catch(() => ({ok: false, error: "The request failed."}));
+  if (r.ok) return refreshKokoro();
+  $("kokoroStatus").innerHTML =
+    `<div class="status bad">${r.error || "Could not start Kokoro."}
+       <button class="mini" id="kokoroStart" style="margin-left:10px">Try again</button></div>`;
+  $("kokoroStart").onclick = startKokoro;
+}
+
+function applyOptions(o) {
+  const stale = (o.v || 1) < SETTINGS_VERSION;
+  // These changed meaning in v2: the line splitter, the CapCut-matching weight
+  // and position. An older session must not hold them back.
+  const skip = stale ? ["max_chars", "min_sub", "margin_v", "font_size", "music_db", "font"] : [];
+  const set = (id, v) => {
+    if (v !== undefined && v !== null && !skip.includes(id)) $(id).value = v;
+  };
+  if (stale) o = {...o, bold: false};
+  ["speed", "kokoro", "lead_in", "tail", "gap_sentence", "gap_slide", "fade",
+   "fps", "font", "font_size", "outline", "margin_v", "max_chars", "min_sub",
+   "music_db", "highlight_colour", "chunk"]
+    .forEach(k => set(k, o[k]));
+  if (o.voice) $("voice").value = o.voice;
+  if (o.bold !== undefined) $("bold").value = o.bold ? "1" : "0";
+  if (o.preset && PRESETS[o.preset]) $("preset").value = o.preset;
+  if (o.highlight !== undefined) $("highlight").value = o.highlight ? "1" : "0";
+  if (o.highlight_colour) $("highlight_colour").value = o.highlight_colour;
+  if (o.chunk) $("chunk").value = o.chunk;
+}
+
+async function boot() {
+  refreshKokoro();          // not awaited: it can resolve while the session loads
+  await voicesReady;
+  const s = await fetch("/session").then(r => r.json()).catch(() => ({}));
+  restoring = true;
+  if (s && s.options) applyOptions(s.options);
+  if (s && s.deckText) {
+    deckText = s.deckText; scriptText = s.scriptText || "";
+    deckName = s.deckName || ""; scriptName = s.scriptName || "";
+    assetFiles = s.assetFiles || {}; assetNames = s.assetNames || {};
+    await inspect();
+  } else {
+    renderAssets();
+  }
+  restoring = false;
+  updateFadeNote();
+  updateHighlightNote();
+  updateSubPreview();
+
+  refreshMusic();
+  refreshCapcutFolder();
+  const last = await fetch("/last").then(r => r.json()).catch(() => ({}));
+  if (last && last.duration) showResult(last, true);
+
+  // A refresh in the middle of a build should pick the build back up.
+  const st = await fetch("/status").then(r => r.json()).catch(() => ({}));
+  if (st && st.running) {
+    buildRunning = true;
+    $("go").disabled = true;
+    $("log").hidden = false;
+    poll();
+  }
+}
+
+boot();
+</script>
+</body>
+</html>

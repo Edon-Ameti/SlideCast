@@ -1,0 +1,9 @@
+# Everything a build touches: decks, scripts, screenshots, the voice cache,
+# the rendered video. All local, none of it belongs in the repository.
+workspace/
+
+# Where this machine's CapCut drafts folder was saved.
+config.json
+
+__pycache__/
+*.pyc
