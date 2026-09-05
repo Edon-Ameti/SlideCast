@@ -250,9 +250,9 @@ still exits 0, so the path is made absolute and the result is checked.
 
 ## Logo
 
-The mark is a slide that ends in a waveform. The frame stops at the bottom
-corners and the voice carries the edge between them, so one outline says
-both halves of the name rather than drawing a screen and a speaker.
+The mark is a deck: three 16:9 slides of the same size, the front one lit
+orange. The cards lean up-left rather than up-right, which is what keeps the
+silhouette from reading as a folder icon.
 
 | File | Use |
 |---|---|
@@ -261,10 +261,12 @@ both halves of the name rather than drawing a screen and a speaker.
 | `logo.svg` | Horizontal lockup, mark plus wordmark. Wordmark is `currentColor` and orange. |
 | `icons/*.png` | Rasters at 512/256/128/64/32. `icon`, plus `mark-on-dark` and `mark-on-light`. |
 
-Regenerate the PNGs by rendering the SVGs in headless Chrome with
-`--default-background-color=00000000`. Note that `<img>` cannot inherit
-`currentColor`, so the mark's frame colour has to be substituted into a copy of
-the SVG before rasterising.
+Regenerate the PNGs by rendering each SVG once at 512 in headless Chrome with
+`--default-background-color=00000000`, then downscaling to the smaller sizes.
+Two traps: `<img>` cannot inherit `currentColor`, so the mark's outline colour
+has to be substituted into a copy of the SVG before rasterising; and a
+`--window-size=128,128` render comes back cropped, which is why the small sizes
+are derived from the 512 rather than rendered natively.
 
 ## What this does not do
 

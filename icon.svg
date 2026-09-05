@@ -5,7 +5,7 @@
     <linearGradient id="scTile" x1="0" y1="0" x2="1" y2="1">
       <stop offset="0" stop-color="#13161f"/><stop offset="1" stop-color="#07080c"/>
     </linearGradient>
-    <linearGradient id="scWaveI" x1="0" y1="0" x2="1" y2="0">
+    <linearGradient id="scCardI" x1="0" y1="0" x2="1" y2="0">
       <stop offset="0" stop-color="#ff7a1a"/><stop offset="1" stop-color="#ff9a3d"/>
     </linearGradient>
   </defs>
@@ -14,10 +14,11 @@
   <rect x="0.6" y="0.6" width="62.8" height="62.8" rx="13.4"
         stroke="#ffffff" stroke-opacity="0.09"/>
 
-  <g transform="translate(5.76 3.63) scale(0.82)">
-  <path d="M 11 45 A 4 4 0 0 1 7 41 L 7 23 A 4 4 0 0 1 11 19 L 53 19 A 4 4 0 0 1 57 23 L 57 41 A 4 4 0 0 1 53 45"
-        stroke="#eef1f7" stroke-width="3" stroke-linecap="round"/>
-  <path d="M 53 45 C 49 45 47 40 43 40 C 39 40 36 50 32 50 C 28 50 25 40 21 40 C 17 40 15 45 11 45"
-        stroke="url(#scWaveI)" stroke-width="3.2" stroke-linecap="round"/>
+  <g transform="translate(32 32) scale(0.82) translate(-32 -32)">
+    <rect x="6" y="11.5" width="46" height="25.9" rx="4.5"
+          stroke="#eef1f7" stroke-width="2.6" stroke-opacity="0.4"/>
+    <rect x="9" y="19" width="46" height="25.9" rx="4.5"
+          stroke="#eef1f7" stroke-width="2.6" stroke-opacity="0.72"/>
+    <rect x="12" y="26.5" width="46" height="25.9" rx="5" fill="url(#scCardI)"/>
   </g>
 </svg>
