@@ -250,9 +250,9 @@ still exits 0, so the path is made absolute and the result is checked.
 
 ## Logo
 
-The mark is a slide broadcasting: a 16:9 frame with a title line, an orange bar
-low inside it for the burned-in subtitle, and three waves coming off its edge
-that fade as they travel.
+The mark is a slide that ends in a waveform. The frame stops at the bottom
+corners and the voice carries the edge between them, so one outline says
+both halves of the name rather than drawing a screen and a speaker.
 
 | File | Use |
 |---|---|
