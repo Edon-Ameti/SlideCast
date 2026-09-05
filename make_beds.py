@@ -2,7 +2,7 @@
 """Generate the built-in music beds.
 
 These are synthesised here rather than downloaded. A web page calling a track
-"royalty free" is not a licence check, and slidecast is not going to hand you a
+"royalty free" is not a licence check, and SlideCast is not going to hand you a
 copyright risk on something you publish. Everything this writes is original and
 free to use.
 

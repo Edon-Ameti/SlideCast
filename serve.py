@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Local web UI for slidecast. Run it, open http://localhost:8770, drop files in."""
+"""Local web UI for SlideCast. Run it, open http://localhost:8770, drop files in."""
 
 import base64
 import hashlib
@@ -31,7 +31,7 @@ RESULT = WORK / "result.json"
 # preview and the build that follows reuse it instead of synthesizing twice.
 CACHE = WORK / "voice_cache"
 MUSIC = WORK / "music"
-# Beds shipped with slidecast, plus anything you drop in beside them.
+# Beds shipped with SlideCast, plus anything you drop in beside them.
 LIBRARY = HERE / "music_library"
 
 
@@ -413,7 +413,7 @@ class Handler(BaseHTTPRequestHandler):
                     {"error": "That build predates CapCut export. Build again."}))
             try:
                 out = capcut.write(
-                    payload.get("name") or "slidecast",
+                    payload.get("name") or "SlideCast",
                     r["pngs"], r["slide_durations"],
                     [tuple(c) for c in r["voice_clips"]],
                     [tuple(e) for e in r["events"]],
@@ -511,7 +511,7 @@ def main():
                      daemon=True).start()
     server = ThreadingHTTPServer(("127.0.0.1", PORT), Handler)
     url = f"http://localhost:{PORT}"
-    print(f"slidecast UI on {url}   (Ctrl+C to stop)")
+    print(f"SlideCast UI on {url}   (Ctrl+C to stop)")
     try:
         webbrowser.open(url)
     except Exception:

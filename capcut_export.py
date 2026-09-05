@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Write a real CapCut draft from a slidecast build, so the cut opens ready to edit.
+"""Write a real CapCut draft from a SlideCast build, so the cut opens ready to edit.
 
 CapCut's draft format is undocumented and version-specific, so nothing here is
 authored from scratch. A known-good draft made by hand in CapCut is kept as
@@ -401,7 +401,7 @@ def rgb(hex_colour):
 
 
 def _stash(src, media):
-    """Copy a file into the draft so it does not depend on slidecast's workspace."""
+    """Copy a file into the draft so it does not depend on SlideCast's workspace."""
     target = media / Path(src).name
     if Path(src).resolve() != target.resolve():
         target.write_bytes(Path(src).read_bytes())
@@ -447,7 +447,7 @@ def write(name, pngs, durations, voice_clips, events, total, *,
     folder.mkdir(parents=True, exist_ok=True)
     (folder / "Resources").mkdir(exist_ok=True)
 
-    # slidecast overwrites its workspace on every build, so the draft gets its
+    # SlideCast overwrites its workspace on every build, so the draft gets its
     # own copy of the media rather than a path that will rot.
     media = folder / "media"
     if media.exists():
@@ -527,7 +527,7 @@ def register(index, name, folder, drafts, draft_id, duration, now, log=print):
                  draft_cover=str(folder / "draft_cover.jpg"),
                  tm_draft_create=now, tm_draft_modified=now,
                  tm_draft_removed=0, tm_duration=duration)
-    backup = index.with_suffix(".json.slidecast-backup")
+    backup = index.with_suffix(".json.SlideCast-backup")
     if not backup.exists():
         backup.write_text(index.read_text(encoding="utf-8"), encoding="utf-8")
     index.write_text(json.dumps(root, ensure_ascii=False), encoding="utf-8")

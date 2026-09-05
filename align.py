@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Word-level timings for the generated voice.
 
-Kokoro returns audio and nothing else, so slidecast knows exactly when each
+Kokoro returns audio and nothing else, so SlideCast knows exactly when each
 sentence starts and ends but not where the words fall inside it. This runs
 faster-whisper over the finished track to recover word timings, then maps them
 back onto the script we already know, which is far more reliable than trusting

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""slidecast - HTML slide deck + Kokoro voiceover script -> finished MP4 with burned subtitles.
+"""SlideCast - HTML slide deck + Kokoro voiceover script -> finished MP4 with burned subtitles.
 
 Each slide is held on screen for exactly as long as its narration, with a fade
 through black between slides. Subtitle text comes from the voiceover script
