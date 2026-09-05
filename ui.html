@@ -291,6 +291,12 @@
     <h2>8 &middot; Build</h2>
     <div class="grid g4" style="margin-bottom:16px">
       <div><label>Frame rate (fps)</label><input type="number" id="fps" value="30"></div>
+      <div><label>Deck design width (px)</label>
+        <select id="design_width">
+          <option value="1536" selected>1536 &mdash; browser at 125% scaling</option>
+          <option value="1920">1920 &mdash; true 1:1</option>
+          <option value="1280">1280 &mdash; browser at 150% scaling</option>
+        </select></div>
       <div><label>Black fades in the MP4</label>
         <select id="with_fades"><option value="1" selected>Yes</option>
         <option value="0">No, do them in CapCut</option></select></div>
@@ -377,7 +383,7 @@ const $ = id => document.getElementById(id);
 /* The subtitle looks on offer. width undefined means "use the box". */
 /* Bumped when a default changes for the better, so a saved session does not
    quietly hold the old value. Settings older than this fall back to defaults. */
-const SETTINGS_VERSION = 5;
+const SETTINGS_VERSION = 6;
 
 const PRESETS = {
   "white-black": {text: "#ffffff", outline: "#000000"},
@@ -616,6 +622,7 @@ function collectOptions() {
     with_fades: $("with_fades").value === "1",
     music_db: num("music_db"),
     chunk: $("chunk").value,
+    design_width: num("design_width"),
     text_colour: PRESETS[$("preset").value].text,
     outline_colour: PRESETS[$("preset").value].outline,
     outline: PRESETS[$("preset").value].width === undefined
@@ -1069,7 +1076,7 @@ function applyOptions(o) {
   if (stale) o = {...o, bold: false};
   ["speed", "kokoro", "lead_in", "tail", "gap_sentence", "gap_slide", "fade",
    "fps", "font", "font_size", "outline", "margin_v", "max_chars", "min_sub",
-   "music_db", "highlight_colour", "chunk"]
+   "music_db", "highlight_colour", "chunk", "design_width"]
     .forEach(k => set(k, o[k]));
   if (o.voice) $("voice").value = o.voice;
   if (o.bold !== undefined) $("bold").value = o.bold ? "1" : "0";

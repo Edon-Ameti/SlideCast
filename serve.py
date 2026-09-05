@@ -144,6 +144,7 @@ def job(payload):
             highlight_colour=o.get("highlight_colour", "#FFD400"),
             whisper=o.get("whisper", "base"),
             chunk=o.get("chunk", "slide"),
+            design_width=int(o.get("design_width", 1536)),
             no_subs=bool(o.get("no_subs", False)),
             no_fades=not bool(o.get("with_fades", True)),
             music=(str(next(iter(sorted(MUSIC.glob("*"))))) 

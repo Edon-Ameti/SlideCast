@@ -125,6 +125,24 @@ Useful flags: `--voice af_sky` `--speed 1.0` `--font-size 54` `--outline 4`
 `--chunk slide|sentence` `--highlight` `--align-words` `--whisper base`.
 `--assets` takes a JSON file mapping a relative `src` to an absolute path.
 
+## Deck design width
+
+Slides are rendered at the CSS viewport width the deck was designed against,
+then scaled up to 1080p. This matters more than it sounds.
+
+A 1920x1080 screen running at 125% Windows scaling gives the browser a
+**1536x864** CSS viewport. A deck laid out by eye in that browser uses type
+sized in fixed pixels, so capturing it at a 1920 viewport instead makes
+everything occupy a smaller share of the frame - same output size, visibly
+smaller text.
+
+**Deck design width** in the Build panel picks the viewport: 1536 for a
+browser at 125% scaling (the default), 1920 for true 1:1, 1280 for 150%.
+Whichever you choose, the render is 1920x1080; only the layout changes.
+
+If the video looks more zoomed out than the deck does fullscreen in your
+browser, this is the setting to change.
+
 ## How the timing works
 
 Kokoro is sent **a whole slide at a time**, so it carries phrasing across

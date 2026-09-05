@@ -341,7 +341,7 @@ def count_slides(html):
     return len(re.findall(r'<section[^>]*class="[^"]*\bslide\b', html))
 
 
-def render_slides(html_path, assets, outdir, chrome, log):
+def render_slides(html_path, assets, outdir, chrome, log, design_width=1536):
     """One 1920x1080 PNG per slide. Returns the list of paths."""
     source = Path(html_path)
     html = absolutize(source.read_text(encoding="utf-8"), source.parent, assets)
@@ -372,8 +372,14 @@ def render_slides(html_path, assets, outdir, chrome, log):
         png = (outdir / f"{index + 1}.png").resolve()
         log(f"  rendering slide {index + 1}/{total}")
         # The '#1' is required: the deck hides its counter only when the hash is non-empty.
+        # The deck is laid out against a CSS viewport, and how big its text
+        # looks depends on that width, not on the output size. A 1920 screen at
+        # 125% Windows scaling gives the browser a 1536 viewport, so a deck
+        # designed by eye there renders smaller if captured at 1920. Render at
+        # the width it was designed for and scale up to 1080p.
         subprocess.run([chrome, "--headless=new", "--disable-gpu", "--hide-scrollbars",
-                        "--force-device-scale-factor=1", "--window-size=1920,1080",
+                        f"--force-device-scale-factor={1920 / design_width:.6f}",
+                        f"--window-size={design_width},{round(design_width * 9 / 16)}",
                         f"--user-data-dir={profile}",
                         f"--screenshot={png}", page.resolve().as_uri() + "#1"],
                        check=True, capture_output=True)
@@ -668,7 +674,8 @@ def run(opts, log=print, audio=None):
 
     log("rendering slides")
     pngs = render_slides(opts.deck, assets, build / "slides",
-                         opts.chrome or find_chrome(), log)
+                         opts.chrome or find_chrome(), log,
+                         getattr(opts, "design_width", 1536))
     if len(pngs) != len(slides):
         raise RuntimeError(
             f"deck has {len(pngs)} slides but the script has {len(slides)}")
@@ -743,6 +750,9 @@ def build_parser():
                    help="shortest time a subtitle line may stay on screen")
     p.add_argument("--bold", action="store_true", help="CapCut subtitles are not bold, so this is off by default")
     p.add_argument("--no-subs", action="store_true")
+    p.add_argument("--design-width", type=int, default=1536, dest="design_width",
+                   help="CSS width the deck was designed against; 1536 is a "
+                        "1920 screen at 125%% Windows scaling, 1920 is 1:1")
     p.add_argument("--chunk", choices=("slide", "sentence"), default="slide",
                    help="send Kokoro a whole slide, or one sentence at a time")
     p.add_argument("--text-colour", default="#ffffff", dest="text_colour")
