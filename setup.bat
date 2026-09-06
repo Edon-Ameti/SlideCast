@@ -62,11 +62,22 @@ if errorlevel 1 (
   echo     [x] Docker Desktop
 )
 
-echo.
-if "!TODO!"=="" goto ready
+rem Docker Desktop runs on WSL and will not start without it. Installing
+rem Docker alone leaves you at a "WSL not installed" dialog on first launch.
+wsl --status >nul 2>&1
+if errorlevel 1 (
+  set "NEEDWSL=1"
+  echo     [ ] WSL             - Docker Desktop needs it, will install
+) else (
+  echo     [x] WSL
+)
 
-echo   These will be installed with winget:
-echo     !TODO!
+echo.
+if "!TODO!"=="" if not defined NEEDWSL goto ready
+
+echo   These will be installed:
+if not "!TODO!"=="" echo     !TODO!   ^(winget^)
+if defined NEEDWSL echo     WSL   ^(needs administrator rights, and a restart afterwards^)
 echo.
 set /p "GO=  Install them now? [y/N] "
 if /i not "!GO!"=="y" (
@@ -80,6 +91,15 @@ for %%P in (!TODO!) do (
   echo.
   echo   Installing %%P
   "!WINGET!" install --id %%P -e --accept-package-agreements --accept-source-agreements
+)
+
+if defined NEEDWSL (
+  echo.
+  echo   Installing WSL. Windows will ask for administrator rights.
+  powershell -NoProfile -Command "Start-Process -FilePath wsl.exe -ArgumentList '--install' -Verb RunAs -Wait"
+  echo.
+  echo   *** Restart this PC before opening Docker Desktop. WSL is not usable
+  echo   *** until you do, and Docker will show a "WSL not installed" error.
 )
 
 echo.
