@@ -162,6 +162,10 @@
     <p class="hint">A whole slide lets Kokoro carry phrasing across sentences, which is how it
        sounds when you paste a paragraph into its own UI. One sentence at a time makes every
        sentence start cold, but pins each sentence boundary exactly without needing alignment.</p>
+    <p class="hint">Leave the Kokoro URL alone unless you already run Kokoro yourself on another
+       port. SlideCast starts its own container on <b>7860</b>, so the default is right on a
+       machine that has never run it. The status line below pings 7860 whatever you type here, so
+       if you do change the port, expect it to report Kokoro as down during a build that works.</p>
     <div class="row" style="margin-top:12px">
       <button class="mini" id="genVoice2" style="padding:10px 18px">Generate the voice</button>
       <button class="mini" id="playVoice2" style="padding:10px 18px">Play the voice</button>
