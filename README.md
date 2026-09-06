@@ -17,6 +17,7 @@ winget on Windows, Homebrew on a mac:
 | **ffmpeg** | Cuts and encodes the video. `ffprobe` comes with it. |
 | **Google Chrome** | Renders each slide to a PNG, headless. |
 | **Docker Desktop** | Runs Kokoro, which speaks the script. |
+| **WSL** | Docker Desktop runs on it, and will not start without it. |
 
 **Running it from a terminal instead of double-clicking.** PowerShell will not
 run a script sitting in the current folder unless the path says so, and plain
@@ -34,6 +35,11 @@ The same applies to `run.bat` and `run.sh`.
 Two things it cannot do for you. Windows only picks up newly installed programs
 in a **new** console window, so close it and use `run.bat` afterwards. And
 Docker Desktop has to be opened by hand once before it will start containers.
+
+**WSL needs a restart.** Installing it needs administrator rights, which is why
+that step asks separately, and it is not usable until the machine reboots. Open
+Docker Desktop before that reboot and it fails with "WSL not installed" even
+though the install worked.
 
 The mac support is written but untested: the Chrome and Docker Desktop
 locations, `open -a` to launch Docker, and `pgrep` to see whether it is up are
