@@ -7,8 +7,9 @@ subtitles burned in from the script text.
 
 ## Setting up a new machine
 
-Double-click **`setup.bat`**. It reports what is already installed, and offers
-to fetch the rest with winget:
+On Windows, double-click **`setup.bat`**. On a mac, run **`./setup.sh`**. Each
+reports what is already installed and offers to fetch the rest &mdash; with
+winget on Windows, Homebrew on a mac:
 
 | | Why |
 |---|---|
@@ -21,6 +22,10 @@ Two things it cannot do for you. Windows only picks up newly installed programs
 in a **new** console window, so close it and use `run.bat` afterwards. And
 Docker Desktop has to be opened by hand once before it will start containers.
 
+The mac support is written but untested: the Chrome and Docker Desktop
+locations, `open -a` to launch Docker, and `pgrep` to see whether it is up are
+all mac paths that have only ever run on Windows here.
+
 Word-by-word subtitle highlighting is the one feature that needs a Python
 package, because it listens back to the generated voice to time each word:
 
@@ -30,7 +35,7 @@ python -m pip install faster-whisper
 
 ## The UI
 
-Double-click **`run.bat`**, or:
+Double-click **`run.bat`** (`./run.sh` on a mac), or:
 
 ```bash
 python serve.py

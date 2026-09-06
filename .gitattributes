@@ -1,0 +1,6 @@
+# Shell scripts must keep LF: a mac will not run a script whose lines end in
+# CRLF, and the error ("bad interpreter") does not mention line endings.
+*.sh text eol=lf
+
+# Batch files are the mirror image - cmd.exe wants CRLF.
+*.bat text eol=crlf

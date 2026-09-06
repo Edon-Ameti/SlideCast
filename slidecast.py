@@ -23,7 +23,16 @@ SAMPLE_RATE = 24000
 CHROME_CANDIDATES = [
     r"C:\Program Files\Google\Chrome\Application\chrome.exe",
     r"C:\Program Files (x86)\Google\Chrome\Application\chrome.exe",
+    "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+    "/Applications/Chromium.app/Contents/MacOS/Chromium",
+    "/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge",
 ]
+
+# Nothing on a mac puts Chrome on PATH, hence the .app paths above. These are
+# for Linux, where the opposite is true and the binary is named half a dozen
+# different things.
+CHROME_ON_PATH = ["chrome", "google-chrome", "google-chrome-stable",
+                  "chromium", "chromium-browser", "msedge"]
 
 # --------------------------------------------------------------------------
 # script parsing
@@ -290,9 +299,10 @@ def find_chrome():
     for candidate in CHROME_CANDIDATES:
         if Path(candidate).exists():
             return candidate
-    found = shutil.which("chrome") or shutil.which("msedge")
-    if found:
-        return found
+    for name in CHROME_ON_PATH:
+        found = shutil.which(name)
+        if found:
+            return found
     raise RuntimeError("Chrome not found; pass --chrome")
 
 

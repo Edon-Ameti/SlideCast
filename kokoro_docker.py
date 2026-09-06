@@ -3,6 +3,7 @@
 
 import os
 import subprocess
+import sys
 import threading
 import time
 from pathlib import Path
@@ -16,7 +17,8 @@ DEFAULT_PORT = 7860
 # ran Kokoro before installing SlideCast has their own container on their own
 # port, and that is the one to talk to rather than making a second.
 _found = None
-DESKTOP = Path(r"C:\Program Files\Docker\Docker\Docker Desktop.exe")
+DESKTOP = (Path("/Applications/Docker.app") if sys.platform == "darwin"
+           else Path(r"C:\Program Files\Docker\Docker\Docker Desktop.exe"))
 RUN_DIR = Path(os.environ.get("LOCALAPPDATA", "")) / "Docker" / "run"
 
 # Only one attempt at a time. Two overlapping launches of Docker Desktop
@@ -185,22 +187,28 @@ def docker_processes_running():
 
 def desktop_running():
     """Is the Docker Desktop app itself up, whatever the engine is doing?"""
-    if os.name != "nt":
-        return False
-    result = subprocess.run(
-        ["tasklist", "/FI", "IMAGENAME eq Docker Desktop.exe", "/NH"],
-        capture_output=True, text=True)
-    return bool(result.returncode == 0 and "Docker Desktop.exe" in result.stdout)
+    if os.name == "nt":
+        result = subprocess.run(
+            ["tasklist", "/FI", "IMAGENAME eq Docker Desktop.exe", "/NH"],
+            capture_output=True, text=True)
+        return bool(result.returncode == 0 and "Docker Desktop.exe" in result.stdout)
+    if sys.platform == "darwin":
+        result = subprocess.run(["pgrep", "-x", "Docker"],
+                                capture_output=True, text=True)
+        return result.returncode == 0
+    return False
 
 
 def desktop_stalled(seconds):
     """Explain a start that never produced a working engine."""
     if desktop_running():
+        sockets = (f" A common one after an unclean shutdown is a leftover socket "
+                   f"in {RUN_DIR}, which Docker cannot delete on the next start - "
+                   f"quitting Docker Desktop fully and reopening it clears that."
+                   if os.name == "nt" else "")
         return (f"Docker Desktop is running but its engine did not come up within "
-                f"{seconds}s. Check its window: it often shows an error there. A "
-                f"common one after an unclean shutdown is a leftover socket in "
-                f"{RUN_DIR}, which Docker cannot delete on the next start - "
-                f"quitting Docker Desktop fully and reopening it clears that.")
+                f"{seconds}s. Check its window: it often shows an error there."
+                + sockets)
     return (f"Docker Desktop did not finish starting within {seconds}s, and its "
             "process is no longer running, so it likely failed or was closed.")
 
@@ -240,12 +248,14 @@ def _ensure(log, wait_docker, wait_api, may_start_desktop):
             # Fully detached. As a child of this server it can be dragged down
             # when the server is killed, and a half-started Docker leaves
             # sockets behind in Local/Docker/run that make the next start fail.
-            flags = 0
             if os.name == "nt":
                 flags = (getattr(subprocess, "DETACHED_PROCESS", 0)
                          | getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0))
-            subprocess.Popen([str(DESKTOP)], close_fds=True, creationflags=flags,
-                             cwd=str(DESKTOP.parent))
+                subprocess.Popen([str(DESKTOP)], close_fds=True, creationflags=flags,
+                                 cwd=str(DESKTOP.parent))
+            else:
+                # DESKTOP is an .app bundle on a mac, which only `open` launches.
+                subprocess.Popen(["open", "-a", str(DESKTOP)], close_fds=True)
         except Exception as exc:
             return {"ok": False, "error": f"Could not launch Docker Desktop: {exc}"}
         deadline = time.time() + wait_docker
