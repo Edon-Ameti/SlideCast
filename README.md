@@ -76,6 +76,13 @@ py -m pip install faster-whisper
 If `py --version` fails too, Python genuinely is not installed:
 `winget install Python.Python.3.13`.
 
+**After installing, open a new terminal.** A shell reads PATH once, when it
+starts, so the window you ran the installer in can never see Python no matter
+how many times you retry or which folder you move to. `run.bat` covers the
+case where PATH is wrong anyway: if neither `python` nor `py` works it looks
+for the interpreter where the installer puts it, under
+`%LOCALAPPDATA%\Programs\Python` or `%ProgramFiles%`.
+
 ## The UI
 
 Double-click **`run.bat`** (`./run.sh` on a mac), or run it from a terminal with
