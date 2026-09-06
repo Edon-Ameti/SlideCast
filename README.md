@@ -5,16 +5,32 @@ slides rendered at 1920x1080, narration generated with Kokoro, each slide held
 for exactly as long as its narration, fades through black between slides, and
 subtitles burned in from the script text.
 
-## Requirements
+## Setting up a new machine
 
-Already set up on this machine:
+Double-click **`setup.bat`**. It reports what is already installed, and offers
+to fetch the rest with winget:
 
-- **Kokoro** running at `http://localhost:7860` (`docker start kokoro-ui`)
-- **ffmpeg** on PATH (`scoop install ffmpeg`)
-- **Chrome** at the default install location
-- **Python 3** with no extra packages
+| | Why |
+|---|---|
+| **Python 3** | Runs SlideCast. No pip packages are needed for a normal build. |
+| **ffmpeg** | Cuts and encodes the video. `ffprobe` comes with it. |
+| **Google Chrome** | Renders each slide to a PNG, headless. |
+| **Docker Desktop** | Runs Kokoro, which speaks the script. |
+
+Two things it cannot do for you. Windows only picks up newly installed programs
+in a **new** console window, so close it and use `run.bat` afterwards. And
+Docker Desktop has to be opened by hand once before it will start containers.
+
+Word-by-word subtitle highlighting is the one feature that needs a Python
+package, because it listens back to the generated voice to time each word:
+
+```bash
+python -m pip install faster-whisper
+```
 
 ## The UI
+
+Double-click **`run.bat`**, or:
 
 ```bash
 python serve.py
