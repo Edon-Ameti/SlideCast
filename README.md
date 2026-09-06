@@ -42,7 +42,16 @@ which is why that step asks separately, and it is not usable until the machine
 reboots. Open Docker Desktop before that reboot and it fails with "WSL not
 installed" even though the install worked.
 
-To do it by hand, in an **Administrator** PowerShell, then restart:
+**The order matters: WSL, then restart, then Docker.** `setup.bat` installs
+them in that order for a reason. Docker Desktop adds itself to startup, so if
+it launches at the next login and WSL is not there yet, it bootstraps a broken
+engine: the `docker-desktop` distro imports but `/opt/docker-desktop` stays
+empty, and Docker hangs on "Starting the Docker Engine" forever. Reinstalling
+Docker does not fix it, because the damage is in a data disk the installer
+keeps.
+
+To install WSL by hand, in an **Administrator** PowerShell, then restart
+before opening Docker Desktop:
 
 ```powershell
 wsl --install
@@ -50,6 +59,21 @@ wsl --install
 
 There is no mac equivalent and nothing to install: Docker Desktop for mac runs
 its Linux containers in its own VM, so WSL never enters into it.
+
+**If Docker is already stuck on "Starting the Docker Engine",** deleting the
+distro is not enough - Docker reattaches the old data disk and skips the
+re-import ("distribution is up to date"). Quit Docker Desktop, make sure no
+`*docker*` process survives, then:
+
+```powershell
+wsl --shutdown
+wsl --unregister docker-desktop
+Remove-Item "$env:LOCALAPPDATA\Docker\wsl" -Recurse -Force
+```
+
+With both the distro and the disk gone it re-imports properly on the next
+start. The disk cannot be deleted while any Docker process holds it, which is
+why the processes have to go first.
 
 The mac support is written but untested: the Chrome and Docker Desktop
 locations, `open -a` to launch Docker, and `pgrep` to see whether it is up are

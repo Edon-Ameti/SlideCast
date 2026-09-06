@@ -87,26 +87,36 @@ if /i not "!GO:~0,1!"=="y" (
   exit /b 1
 )
 
+rem WSL first, always. Docker Desktop starts itself at the next login, and if
+rem WSL is not there by then it bootstraps a broken engine that survives
+rem reinstalling Docker - the distro imports but /opt/docker-desktop stays
+rem empty, and it hangs on "Starting the Docker Engine" forever.
+if defined NEEDWSL (
+  echo.
+  echo   Installing WSL first, because Docker Desktop is built on it.
+  echo   Windows will ask for administrator rights.
+  powershell -NoProfile -Command "Start-Process -FilePath wsl.exe -ArgumentList '--install' -Verb RunAs -Wait"
+)
+
 for %%P in (!TODO!) do (
   echo.
   echo   Installing %%P
   "!WINGET!" install --id %%P -e --accept-package-agreements --accept-source-agreements
 )
 
+echo.
 if defined NEEDWSL (
+  echo   *** RESTART THIS PC NOW, before opening Docker Desktop. ***
   echo.
-  echo   Installing WSL. Windows will ask for administrator rights.
-  powershell -NoProfile -Command "Start-Process -FilePath wsl.exe -ArgumentList '--install' -Verb RunAs -Wait"
+  echo   WSL is not usable until the machine reboots. Docker Desktop opened
+  echo   before that reboot builds a broken engine that a reinstall will not
+  echo   repair, so let the restart happen first.
+) else (
+  echo   Done. Close this window and run  run.bat  - a new window is needed
+  echo   for Windows to see the programs that were just installed.
   echo.
-  echo   *** Restart this PC before opening Docker Desktop. WSL is not usable
-  echo   *** until you do, and Docker will show a "WSL not installed" error.
+  echo   Docker Desktop must be opened once by hand before the voice works.
 )
-
-echo.
-echo   Done. Close this window and run  run.bat  - a new window is needed for
-echo   Windows to see the programs that were just installed.
-echo.
-echo   Docker Desktop must be opened once by hand before the voice will work.
 echo.
 call :findpy
 call :whisper
