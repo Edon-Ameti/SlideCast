@@ -28,30 +28,7 @@ echo.
 
 set "TODO="
 
-rem `where python` is not enough. Windows ships a Microsoft Store stub called
-rem python.exe in WindowsApps, which is on PATH, so the name is always found
-rem even when no Python is installed - running it just advertises the Store.
-rem Only actually running it proves anything.
-set "PY="
-python --version >nul 2>&1
-if not errorlevel 1 set "PY=python"
-if not defined PY (
-  py -3 --version >nul 2>&1
-  if not errorlevel 1 set "PY=py -3"
-)
-rem Last resort: PATH can simply be wrong - winget installs Python without
-rem always putting it there, and the Store stub answers to `python` meanwhile.
-rem The installer lands in one of these two places.
-if not defined PY (
-  for /d %%D in ("%LOCALAPPDATA%\Programs\Python\Python3*") do (
-    if exist "%%D\python.exe" set PY="%%D\python.exe"
-  )
-)
-if not defined PY (
-  for /d %%D in ("%ProgramFiles%\Python3*") do (
-    if exist "%%D\python.exe" set PY="%%D\python.exe"
-  )
-)
+call :findpy
 if not defined PY (
   set "TODO=!TODO! Python.Python.3.13"
   echo     [ ] Python 3        - will install
@@ -103,7 +80,7 @@ if not "!TODO!"=="" echo     !TODO!   ^(winget^)
 if defined NEEDWSL echo     WSL   ^(needs administrator rights, and a restart afterwards^)
 echo.
 set /p "GO=  Install them now? [y/N] "
-if /i not "!GO!"=="y" (
+if /i not "!GO:~0,1!"=="y" (
   echo.
   echo   Nothing was installed.
   pause
@@ -130,15 +107,65 @@ echo   Done. Close this window and run  run.bat  - a new window is needed for
 echo   Windows to see the programs that were just installed.
 echo.
 echo   Docker Desktop must be opened once by hand before the voice will work.
-echo   For word-by-word subtitle highlighting, also run:
-echo       python -m pip install faster-whisper
 echo.
+call :findpy
+call :whisper
 pause
 exit /b 0
 
 :ready
 echo   Everything SlideCast needs is already installed.
 echo.
+call :whisper
 set /p "GO=  Start SlideCast now? [Y/n] "
-if /i "!GO!"=="n" exit /b 0
+if /i "!GO:~0,1!"=="n" exit /b 0
 call run.bat
+
+goto :eof
+
+:findpy
+rem `where python` is not enough. Windows ships a Microsoft Store stub called
+rem python.exe in WindowsApps, which is on PATH, so the name is always found
+rem even when no Python is installed - running it just advertises the Store.
+rem Only actually running it proves anything.
+set "PY="
+python --version >nul 2>&1
+if not errorlevel 1 set "PY=python"
+if not defined PY (
+  py -3 --version >nul 2>&1
+  if not errorlevel 1 set "PY=py -3"
+)
+rem Last resort: PATH can simply be wrong - winget installs Python without
+rem always putting it there, and the Store stub answers to `python` meanwhile.
+rem The installer lands in one of these two places.
+if not defined PY (
+  for /d %%D in ("%LOCALAPPDATA%\Programs\Python\Python3*") do (
+    if exist "%%D\python.exe" set PY="%%D\python.exe"
+  )
+)
+if not defined PY (
+  for /d %%D in ("%ProgramFiles%\Python3*") do (
+    if exist "%%D\python.exe" set PY="%%D\python.exe"
+  )
+)
+exit /b
+
+:whisper
+rem Word-by-word highlighting listens back to the generated voice, which is
+rem the one thing here that needs a package rather than a program.
+if not defined PY exit /b
+%PY% -c "import faster_whisper" >nul 2>&1
+if not errorlevel 1 (
+  echo   [x] faster-whisper ^(word-by-word subtitle highlighting^)
+  echo.
+  exit /b
+)
+echo   Optional: word-by-word subtitle highlighting needs the faster-whisper
+echo   package, about 200 MB with what it depends on. Everything else works
+echo   without it.
+set "FW="
+set /p "FW=  Install it now? [y/N] "
+if /i not "%FW:~0,1%"=="y" exit /b
+%PY% -m pip install faster-whisper
+echo.
+exit /b

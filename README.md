@@ -56,7 +56,10 @@ locations, `open -a` to launch Docker, and `pgrep` to see whether it is up are
 all mac paths that have only ever run on Windows here.
 
 Word-by-word subtitle highlighting is the one feature that needs a Python
-package, because it listens back to the generated voice to time each word:
+package, because it listens back to the generated voice to time each word.
+The setup scripts offer it at the end, using the interpreter they found
+rather than whatever `python` happens to mean, and skip the question if it
+is already there. By hand it is:
 
 ```bash
 python -m pip install faster-whisper

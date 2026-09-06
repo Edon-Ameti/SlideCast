@@ -15,6 +15,33 @@ if ! command -v brew >/dev/null 2>&1; then
   exit 1
 fi
 
+# Word-by-word highlighting listens back to the generated voice, which is the
+# one thing here that needs a package rather than a program.
+whisper() {
+  command -v python3 >/dev/null 2>&1 || return 0
+  if python3 -c "import faster_whisper" >/dev/null 2>&1; then
+    echo "    [x] faster-whisper (word-by-word subtitle highlighting)"
+    echo
+    return 0
+  fi
+  echo "  Optional: word-by-word subtitle highlighting needs the faster-whisper"
+  echo "  package, about 200 MB with what it depends on. Everything else works"
+  echo "  without it."
+  printf "  Install it now? [y/N] "
+  read -r FW
+  case "$FW" in
+    [Yy]*) ;;
+    *) return 0 ;;
+  esac
+  if ! python3 -m pip install faster-whisper; then
+    echo
+    echo "  pip refused. A Homebrew Python guards itself against system-wide"
+    echo "  installs, and getting past that means saying so outright:"
+    echo "      python3 -m pip install --break-system-packages faster-whisper"
+  fi
+  echo
+}
+
 echo "  What this machine already has:"
 echo
 
@@ -53,6 +80,7 @@ echo
 if [ -z "$FORMULAE$CASKS" ]; then
   echo "  Everything SlideCast needs is already installed."
   echo
+  whisper
   printf "  Start SlideCast now? [Y/n] "
   read -r GO
   case "$GO" in
@@ -87,6 +115,4 @@ echo
 echo "  Done. Open Docker Desktop once by hand before the voice will work,"
 echo "  then start SlideCast with:  ./run.sh"
 echo
-echo "  For word-by-word subtitle highlighting, also run:"
-echo "      python3 -m pip install faster-whisper"
-echo
+whisper
