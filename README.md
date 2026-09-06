@@ -62,6 +62,20 @@ package, because it listens back to the generated voice to time each word:
 python -m pip install faster-whisper
 ```
 
+**If that says "Python was not found; run without arguments to install from
+the Microsoft Store"**, you are talking to a Windows stub, not to Python.
+Windows keeps a fake `python.exe` in `WindowsApps` that only advertises the
+Store, and it answers whenever the real Python is not on PATH - usually
+because the terminal predates the install. Open a new terminal, and if it
+persists use the launcher, which the stub cannot shadow:
+
+```bash
+py -m pip install faster-whisper
+```
+
+If `py --version` fails too, Python genuinely is not installed:
+`winget install Python.Python.3.13`.
+
 ## The UI
 
 Double-click **`run.bat`** (`./run.sh` on a mac), or run it from a terminal with

@@ -28,8 +28,18 @@ echo.
 
 set "TODO="
 
-where python >nul 2>&1
-if errorlevel 1 (
+rem `where python` is not enough. Windows ships a Microsoft Store stub called
+rem python.exe in WindowsApps, which is on PATH, so the name is always found
+rem even when no Python is installed - running it just advertises the Store.
+rem Only actually running it proves anything.
+set "PY="
+python --version >nul 2>&1
+if not errorlevel 1 set "PY=python"
+if not defined PY (
+  py -3 --version >nul 2>&1
+  if not errorlevel 1 set "PY=py -3"
+)
+if not defined PY (
   set "TODO=!TODO! Python.Python.3.13"
   echo     [ ] Python 3        - will install
 ) else (
