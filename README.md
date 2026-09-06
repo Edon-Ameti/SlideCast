@@ -18,6 +18,19 @@ winget on Windows, Homebrew on a mac:
 | **Google Chrome** | Renders each slide to a PNG, headless. |
 | **Docker Desktop** | Runs Kokoro, which speaks the script. |
 
+**Running it from a terminal instead of double-clicking.** PowerShell will not
+run a script sitting in the current folder unless the path says so, and plain
+`setup.bat` fails there with "not recognized". The prefix differs per shell:
+
+| Shell | Command |
+|---|---|
+| PowerShell | `.\setup.bat` |
+| cmd.exe | `setup.bat` |
+| Git Bash | `./setup.bat` |
+| mac / Linux | `./setup.sh` |
+
+The same applies to `run.bat` and `run.sh`.
+
 Two things it cannot do for you. Windows only picks up newly installed programs
 in a **new** console window, so close it and use `run.bat` afterwards. And
 Docker Desktop has to be opened by hand once before it will start containers.
@@ -35,7 +48,8 @@ python -m pip install faster-whisper
 
 ## The UI
 
-Double-click **`run.bat`** (`./run.sh` on a mac), or:
+Double-click **`run.bat`** (`./run.sh` on a mac), or run it from a terminal with
+the prefix your shell wants &mdash; `.\run.bat` in PowerShell &mdash; or:
 
 ```bash
 python serve.py
