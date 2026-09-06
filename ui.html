@@ -150,7 +150,7 @@
     <div class="grid g3">
       <div><label>Kokoro voice</label><select id="voice"></select></div>
       <div><label>Speed</label><input type="number" id="speed" value="1.0" step="0.05" min="0.5" max="2"></div>
-      <div><label>Kokoro URL</label><input type="text" id="kokoro" value="http://localhost:7860/tts/convert"></div>
+      <div><label>Kokoro URL</label><input type="text" id="kokoro" placeholder="looking for Kokoro&hellip;"></div>
     </div>
     <div class="grid g3" style="margin-top:12px">
       <div><label>Send Kokoro</label>
@@ -162,10 +162,11 @@
     <p class="hint">A whole slide lets Kokoro carry phrasing across sentences, which is how it
        sounds when you paste a paragraph into its own UI. One sentence at a time makes every
        sentence start cold, but pins each sentence boundary exactly without needing alignment.</p>
-    <p class="hint">Leave the Kokoro URL alone unless you already run Kokoro yourself on another
-       port. SlideCast starts its own container on <b>7860</b>, so the default is right on a
-       machine that has never run it. The status line below pings 7860 whatever you type here, so
-       if you do change the port, expect it to report Kokoro as down during a build that works.</p>
+    <p class="hint">The Kokoro URL fills itself in: SlideCast asks Docker which Kokoro container
+       you already have and uses the port that one publishes, whatever it is called. If you have
+       never run Kokoro, it stays empty until you start it, and the container SlideCast creates
+       publishes <b>7860</b>. Type your own URL to override it &mdash; the status line below then
+       reports on that URL rather than on the container.</p>
     <div class="row" style="margin-top:12px">
       <button class="mini" id="genVoice2" style="padding:10px 18px">Generate the voice</button>
       <button class="mini" id="playVoice2" style="padding:10px 18px">Play the voice</button>
@@ -1034,8 +1035,12 @@ async function refreshKokoro(quiet) {
 async function checkKokoroOnce(quiet) {
   // Asking Docker takes a few seconds when Kokoro is down, so say so meanwhile.
   if (!quiet) $("kokoroStatus").innerHTML = `<div class="status">Checking Kokoro&hellip;</div>`;
-  const s = await fetch("/kokoro").then(r => r.json()).catch(() => ({api: false}));
+  const typed = $("kokoro").value.trim();
+  const s = await fetch("/kokoro?url=" + encodeURIComponent(typed))
+    .then(r => r.json()).catch(() => ({api: false}));
   kokoroOK = !!s.api;
+  // Only ever fill a field the user has left alone, so a typed URL survives.
+  if (!typed && s.url) { $("kokoro").value = s.url; saveSession(); }
   if (s.api) {
     $("kokoroStatus").innerHTML =
       `<div class="status ok">Kokoro is running and answering.</div>`;
@@ -1044,8 +1049,13 @@ async function checkKokoroOnce(quiet) {
   const why = s.docker === false
     ? "Kokoro is not answering, and Docker is not running either."
     : (s.container === "missing"
-        ? "Kokoro is not answering, and the kokoro-ui container does not exist yet."
-        : "Kokoro is not answering. The container is not started.");
+        ? "Kokoro is not answering, and no Kokoro container exists yet."
+        : (s.container === "running"
+            ? (typed
+                ? "Nothing answered at the URL you typed, though a Kokoro container is running. "
+                  + "Check the URL, or clear the field to use the one SlideCast finds."
+                : "The container is running but Kokoro is not answering yet.")
+            : "Kokoro is not answering. The container is not started."));
   $("kokoroStatus").innerHTML =
     `<div class="status bad">${why}
        <button class="mini" id="kokoroStart" style="margin-left:10px">Start Kokoro</button></div>`;

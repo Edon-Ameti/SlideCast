@@ -13,6 +13,7 @@ import webbrowser
 from argparse import Namespace
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+from urllib.parse import parse_qs, urlparse
 
 import slidecast as d
 import kokoro_docker as kokoro
@@ -123,7 +124,7 @@ def job(payload):
             assets=str(assets_file),
             voice=o.get("voice", "af_sky"),
             speed=float(o.get("speed", 1.0)),
-            kokoro=o.get("kokoro", d.KOKORO_URL),
+            kokoro=o.get("kokoro") or kokoro.convert_url(),
             lead_in=float(o.get("lead_in", 0.6)),
             tail=float(o.get("tail", 1.2)),
             gap_sentence=float(o.get("gap_sentence", 0.28)),
@@ -189,7 +190,7 @@ def voice_job(payload):
         opts = Namespace(
             script=str(WORK / "voiceover.txt"),
             voice=o.get("voice", "af_sky"), speed=float(o.get("speed", 1.0)),
-            kokoro=o.get("kokoro", d.KOKORO_URL),
+            kokoro=o.get("kokoro") or kokoro.convert_url(),
             lead_in=float(o.get("lead_in", 0.6)), tail=float(o.get("tail", 1.2)),
             gap_sentence=float(o.get("gap_sentence", 0.28)),
             gap_slide=float(o.get("gap_slide", 1.1)),
@@ -328,7 +329,10 @@ class Handler(BaseHTTPRequestHandler):
         if route == "/status":
             return self.send(200, json.dumps(JOB))
         if route == "/kokoro":
-            return self.send(200, json.dumps(kokoro.status()))
+            # The page passes the URL its own field holds, so the status line
+            # reports on the Kokoro the build will actually call.
+            asked = parse_qs(urlparse(self.path).query).get("url", [""])[0].strip()
+            return self.send(200, json.dumps(kokoro.status(asked or None)))
         if route == "/session":
             return self.send(200, SESSION.read_text(encoding="utf-8")
                              if SESSION.exists() else json.dumps({}))

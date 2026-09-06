@@ -10,8 +10,12 @@ from urllib import request as urlrequest
 
 CONTAINER = "kokoro-ui"
 IMAGE = "sensejworld/kokorotts:latest"
-PORT = 7860
-PING = f"http://localhost:{PORT}/tts/ping"
+DEFAULT_PORT = 7860
+
+# The container we found on this machine, as (name, port). Someone who already
+# ran Kokoro before installing SlideCast has their own container on their own
+# port, and that is the one to talk to rather than making a second.
+_found = None
 DESKTOP = Path(r"C:\Program Files\Docker\Docker\Docker Desktop.exe")
 RUN_DIR = Path(os.environ.get("LOCALAPPDATA", "")) / "Docker" / "run"
 
@@ -21,12 +25,64 @@ RUN_DIR = Path(os.environ.get("LOCALAPPDATA", "")) / "Docker" / "run"
 _gate = threading.Lock()
 
 
-def api_alive(timeout=3):
+def current_port():
+    return _found[1] if _found else DEFAULT_PORT
+
+
+def convert_url(port=None):
+    return f"http://localhost:{port or current_port()}/tts/convert"
+
+
+def ping_for(url):
+    """The health endpoint that goes with a /tts/convert URL."""
+    return url.rsplit("/tts/", 1)[0] + "/tts/ping" if "/tts/" in url else url
+
+
+def api_alive(url=None, timeout=3):
+    target = ping_for(url) if url else f"http://localhost:{current_port()}/tts/ping"
     try:
-        with urlrequest.urlopen(PING, timeout=timeout) as response:
+        with urlrequest.urlopen(target, timeout=timeout) as response:
             return response.status == 200
     except Exception:
         return False
+
+
+def published_port(name):
+    fmt = "{{range .HostConfig.PortBindings}}{{range .}}{{.HostPort}} {{end}}{{end}}"
+    result = _docker("inspect", "-f", fmt, name, timeout=20)
+    if not result or result.returncode != 0:
+        return None
+    for token in result.stdout.split():
+        if token.isdigit():
+            return int(token)
+    return None
+
+
+def discover():
+    """A Kokoro container already on this machine, as (name, port), or None.
+
+    Matched on the image rather than the name, so one somebody set up
+    themselves is found whatever they called it and whatever port they
+    published it on. A running one wins over a stopped one.
+    """
+    result = _docker("ps", "-a", "--format", "{{.Names}}	{{.Image}}	{{.State}}", timeout=20)
+    if not result or result.returncode != 0:
+        return None
+    stopped = None
+    for line in result.stdout.splitlines():
+        parts = [piece.strip() for piece in line.split("	")]
+        if len(parts) < 3:
+            continue
+        name, image, state = parts[0], parts[1], parts[2]
+        if "kokoro" not in f"{name} {image}".lower():
+            continue
+        port = published_port(name)
+        if not port:
+            continue
+        if state == "running":
+            return name, port
+        stopped = stopped or (name, port)
+    return stopped
 
 
 def _docker(*args, timeout=25):
@@ -43,19 +99,37 @@ def docker_alive():
 
 
 def container_state():
-    result = _docker("inspect", "-f", "{{.State.Status}}", CONTAINER, timeout=20)
+    name = _found[0] if _found else CONTAINER
+    result = _docker("inspect", "-f", "{{.State.Status}}", name, timeout=20)
     if not result or result.returncode != 0:
         return "missing"
     return result.stdout.strip() or "missing"
 
 
-def status():
-    """Cheap enough to call on every page load."""
-    if api_alive():
-        return {"api": True, "docker": True, "container": "running"}
+def status(url=None):
+    """Cheap enough to call on every page load: one ping unless it fails.
+
+    Docker is only asked once the ping has failed, which is also the only time
+    the answer can have changed.
+    """
+    global _found
+    if api_alive(url):
+        # Something answered, so the URL is known whether or not Docker was
+        # ever asked about a container.
+        return {"api": True, "docker": True, "container": "running",
+                "port": current_port(), "url": url or convert_url()}
     docker = docker_alive()
+    if docker:
+        found = discover()
+        if found:
+            _found = found
+            if url is None and api_alive():
+                return {"api": True, "docker": True, "container": "running",
+                        "port": current_port(), "url": convert_url()}
     return {"api": False, "docker": docker,
-            "container": container_state() if docker else "unknown"}
+            "container": container_state() if docker else "unknown",
+            "port": current_port(),
+            "url": url or (convert_url() if _found else None)}
 
 
 def clear_stale_sockets():
@@ -184,19 +258,24 @@ def _ensure(log, wait_docker, wait_api, may_start_desktop):
         done.append("started Docker Desktop")
         log("Docker is up")
 
+    global _found
+    _found = discover() or _found
+    name = _found[0] if _found else CONTAINER
+
     state = container_state()
     if state == "missing":
-        log(f"No {CONTAINER} container yet, creating it")
+        log(f"No Kokoro container yet, creating {CONTAINER}")
         # Long timeout: this pulls the image the first time.
         result = _docker("run", "-d", "--name", CONTAINER,
-                         "-p", f"{PORT}:{PORT}", IMAGE, timeout=900)
+                         "-p", f"{DEFAULT_PORT}:{DEFAULT_PORT}", IMAGE, timeout=900)
         if not result or result.returncode != 0:
             return {"ok": False, "error": "docker run failed: " +
                     (result.stderr.strip() if result else "no response from docker")}
+        _found = (CONTAINER, DEFAULT_PORT)
         done.append("created the container")
     elif state != "running":
-        log(f"Starting the {CONTAINER} container")
-        result = _docker("start", CONTAINER, timeout=90)
+        log(f"Starting the {name} container")
+        result = _docker("start", name, timeout=90)
         if not result or result.returncode != 0:
             return {"ok": False, "error": "docker start failed: " +
                     (result.stderr.strip() if result else "no response from docker")}
