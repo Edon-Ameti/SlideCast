@@ -11,8 +11,9 @@ if not defined PY (
   py -3 --version >nul 2>&1
   if not errorlevel 1 set "PY=py -3"
 )
-rem Last resort: PATH can simply be wrong - winget installs Python without
-rem always putting it there, and the Store stub answers to `python` meanwhile.
+rem Last resort, for when even the launcher is missing. winget does put Python
+rem on the user PATH, but Windows searches the machine PATH first, so a
+rem WindowsApps entry there leaves the Store stub answering to `python` anyway.
 rem The installer lands in one of these two places.
 if not defined PY (
   for /d %%D in ("%LOCALAPPDATA%\Programs\Python\Python3*") do (

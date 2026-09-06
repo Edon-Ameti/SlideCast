@@ -23,6 +23,9 @@ SAMPLE_RATE = 24000
 CHROME_CANDIDATES = [
     r"C:\Program Files\Google\Chrome\Application\chrome.exe",
     r"C:\Program Files (x86)\Google\Chrome\Application\chrome.exe",
+    # Chrome installed without administrator rights goes into the user's own
+    # AppData rather than Program Files, and nothing puts it on PATH.
+    str(Path.home() / r"AppData\Local\Google\Chrome\Application\chrome.exe"),
     "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
     "/Applications/Chromium.app/Contents/MacOS/Chromium",
     "/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge",

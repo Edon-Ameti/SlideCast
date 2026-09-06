@@ -75,6 +75,37 @@ With both the distro and the disk gone it re-imports properly on the next
 start. The disk cannot be deleted while any Docker process holds it, which is
 why the processes have to go first.
 
+**If that purge changes nothing, the install itself is damaged.** That was the
+cause here, and no amount of deleting distros touched it, because the broken
+file lives in `Program Files` instead. Docker ships two ISOs with the hashes it
+expects beside them, and checks them every time the engine starts:
+
+```powershell
+$r = "$env:ProgramFiles\Docker\Docker\resources"
+foreach ($iso in "$r\docker-desktop.iso", "$r\wsl\docker-wsl-cli.iso") {
+  $want = Get-Content "$iso.sha256"
+  $got  = (Get-FileHash $iso -Algorithm SHA256).Hash.ToLower()
+  if ($want -eq $got) { "OK      $iso" } else { "CORRUPT $iso" }
+}
+```
+
+A copy that was corrupted on its way to disk keeps its full size, so nothing
+looks wrong from outside. `wsl-bootstrap` refuses to mount it, so
+`/opt/docker-desktop` is never populated, `componentsVersion.json` is reported
+missing, the guest socket is never created, and Docker hangs on "Starting the
+Docker Engine" exactly as above. The only honest trace is one line in
+`%LOCALAPPDATA%\Docker\log\host\com.docker.backend.exe.log`:
+
+```
+Error: preparing environment: mounting cli-tools iso: copying to cache:
+expected digest <one hash> actual digest <another>
+```
+
+Installing the same version over the top does **not** repair it: the installer
+sees that version already present and leaves the files alone. Uninstall Docker
+Desktop, restart, then install it again from a fresh download. `setup.bat` runs
+this check for you and says so before you lose an afternoon to it.
+
 The mac support is written but untested: the Chrome and Docker Desktop
 locations, `open -a` to launch Docker, and `pgrep` to see whether it is up are
 all mac paths that have only ever run on Windows here.
