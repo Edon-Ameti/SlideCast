@@ -286,13 +286,17 @@ class Draft:
 
     # ---- the three kinds of content -------------------------------------
 
-    def slides(self, pngs, durations, fade_us, with_fades):
+    def slides(self, pngs, durations, fade_us, with_fades, size=(1920, 1080),
+               fade_after=None):
+        """fade_after marks the pictures that end a slide. A slide with steps is
+        several pictures, and only its last one fades to the next slide."""
+        fade_after = fade_after or [True] * len(pngs)
         segments, start = [], 0
         for i, (png, dur) in enumerate(zip(pngs, durations)):
             material = copy.deepcopy(self.video_material)
             material.update(id=new_id(), path=str(Path(png).resolve()),
                             material_name=Path(png).name, type="photo",
-                            width=1920, height=1080)
+                            width=size[0], height=size[1])
             self._add("videos", material)
 
             seg = copy.deepcopy(self.exemplars["video"])
@@ -302,7 +306,8 @@ class Draft:
             # A transition belongs to the segment it starts from, so the last
             # slide never carries one.
             seg["extra_material_refs"] = self._clone_aux(
-                self.exemplars["video"], with_fades and i < len(pngs) - 1, fade_us)
+                self.exemplars["video"],
+                with_fades and fade_after[i] and i < len(pngs) - 1, fade_us)
             length = int(round(dur * US))
             seg["source_timerange"] = {"start": 0, "duration": length}
             seg["target_timerange"] = {"start": start, "duration": length}
@@ -421,7 +426,8 @@ def free_name(drafts, name):
 def write(name, pngs, durations, voice_clips, events, total, *,
           fade=0.4666, with_fades=True, music=None, music_volume=0.1,
           music_duration=0.0, style=None, drafts_dir=None,
-          app_version=None, overwrite=False, log=print):
+          app_version=None, overwrite=False, size=(1920, 1080), margin_v=20,
+          fade_after=None, log=print):
     """Create the draft folder and register it so CapCut lists it."""
     drafts = Path(drafts_dir) if drafts_dir else drafts_folder()
     if drafts is None:
@@ -431,8 +437,12 @@ def write(name, pngs, durations, voice_clips, events, total, *,
     if not TEMPLATE.exists():
         raise RuntimeError(f"CapCut template missing at {TEMPLATE}")
 
+    # CapCut places text on a -1 (bottom) to 1 (top) scale. The template's
+    # -0.92778 is 39px off the bottom of a 1080 frame, for a margin of 20; the
+    # same 19px allowance keeps the subtitle where the MP4 puts it in any shape.
+    subtitle_y = -1 + (margin_v + 19) / (size[1] / 2)
     style = {**{"font_size": 5.0, "text_color": "#ffffff", "border_color": "#000000",
-                "stroke_width": 0.08, "y": -0.92778,
+                "stroke_width": 0.08, "y": subtitle_y,
                 "fill": [1.0, 1.0, 1.0], "stroke": [0.0, 0.0, 0.0]}, **(style or {})}
 
     # Reusing a name would destroy the earlier draft, including anything
@@ -459,7 +469,8 @@ def write(name, pngs, durations, voice_clips, events, total, *,
         music = _stash(music, media)
 
     draft = Draft()
-    draft.slides(pngs, durations, fade * US, with_fades)
+    draft.doc["canvas_config"].update(width=size[0], height=size[1])
+    draft.slides(pngs, durations, fade * US, with_fades, size, fade_after)
     draft.voice(voice_clips)
     draft.subtitles(events, style)
     if music:

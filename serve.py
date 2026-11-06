@@ -18,6 +18,8 @@ from urllib.parse import parse_qs, urlparse
 import slidecast as d
 import kokoro_docker as kokoro
 import capcut_export as capcut
+import ai
+import deck_template
 
 HERE = Path(__file__).parent
 WORK = HERE / "workspace"
@@ -31,9 +33,19 @@ RESULT = WORK / "result.json"
 # The voice is the slow part of a build. Generating it once lets the music
 # preview and the build that follows reuse it instead of synthesizing twice.
 CACHE = WORK / "voice_cache"
+# One recording per slide (or sentence), so an edit re-records only what changed.
+PIECES = CACHE / "pieces"
 MUSIC = WORK / "music"
 # Beds shipped with SlideCast, plus anything you drop in beside them.
 LIBRARY = HERE / "music_library"
+
+
+def chunk_for(payload):
+    """Subtitles in another language than the voice need each sentence
+    recorded on its own, whatever the Voice panel says."""
+    if payload.get("voice_script") and payload.get("subtitles") == "original":
+        return "sentence"
+    return payload.get("options", {}).get("chunk", "slide")
 
 
 def voice_key(payload):
@@ -48,10 +60,12 @@ def voice_key(payload):
         except (TypeError, ValueError):
             return str(value)
 
-    o = payload.get("options", {})
-    parts = [payload.get("script", "")] + [token(o.get(k)) for k in
+    o = {**payload.get("options", {}), "chunk": chunk_for(payload)}
+    # A translated voice speaks the translation, not the script on screen.
+    spoken = payload.get("voice_script") or payload.get("script", "")
+    parts = [spoken] + [token(o.get(k)) for k in
              ("voice", "speed", "lead_in", "tail", "gap_sentence", "gap_slide",
-              "chunk")]
+              "chunk")] + [d.load_pronunciations()]
     return hashlib.sha1(json.dumps(parts).encode("utf-8")).hexdigest()
 
 
@@ -80,7 +94,13 @@ VOICES = ["af_sky", "af_heart", "af_bella", "af_nicole", "af_sarah", "af_nova",
           "af_aoede", "af_kore", "af_jessica", "af_river", "af_alloy",
           "am_adam", "am_michael", "am_echo", "am_eric", "am_liam", "am_onyx",
           "am_puck", "am_fenrir", "am_santa", "am_every",
-          "bf_emma", "bf_isabella", "bf_alice", "bf_lily"]
+          "bf_emma", "bf_isabella", "bf_alice", "bf_lily",
+          "bm_george", "bm_lewis", "bm_daniel", "bm_fable",
+          "ef_dora", "em_alex", "em_santa",
+          "ff_siwis",
+          "if_sara", "im_nicola",
+          "pf_dora", "pm_alex", "pm_santa",
+          "hf_alpha", "hf_beta", "hm_omega", "hm_psi"]
 
 JOB = {"running": False, "kind": None, "log": [], "error": None, "result": None}
 
@@ -95,10 +115,12 @@ def log(message):
 
 def write_inputs(payload):
     WORK.mkdir(exist_ok=True)
-    for stale in ("video-presentation.html", "voiceover.txt"):
+    for stale in ("video-presentation.html", "voiceover.txt", "voiceover-voice.txt"):
         (WORK / stale).unlink(missing_ok=True)
     (WORK / "video-presentation.html").write_text(payload["deck"], encoding="utf-8")
     (WORK / "voiceover.txt").write_text(payload["script"], encoding="utf-8")
+    if payload.get("voice_script"):
+        (WORK / "voiceover-voice.txt").write_text(payload["voice_script"], encoding="utf-8")
     assets_dir = WORK / "assets"
     assets_dir.mkdir(exist_ok=True)
     mapping = {}
@@ -116,15 +138,22 @@ def job(payload):
         assets_file = WORK / "assets.json"
         assets_file.write_text(json.dumps(mapping), encoding="utf-8")
         o = payload.get("options", {})
+        # With a translation, the voice speaks it. The subtitles follow it too,
+        # unless they were asked to stay in the original language.
+        translated = bool(payload.get("voice_script"))
+        original_subs = translated and payload.get("subtitles") == "original"
+        on_screen = "voiceover.txt" if not translated or original_subs else "voiceover-voice.txt"
         opts = Namespace(
             deck=str(WORK / "video-presentation.html"),
-            script=str(WORK / "voiceover.txt"),
+            script=str(WORK / on_screen),
+            voice_script=str(WORK / "voiceover-voice.txt") if original_subs else None,
             out=str(WORK / "video.mp4"),
             build=str(WORK / "build"),
             assets=str(assets_file),
             voice=o.get("voice", "af_sky"),
             speed=float(o.get("speed", 1.0)),
             kokoro=o.get("kokoro") or kokoro.convert_url(),
+            pronunciations=str(d.PRONUNCIATIONS),
             lead_in=float(o.get("lead_in", 0.6)),
             tail=float(o.get("tail", 1.2)),
             gap_sentence=float(o.get("gap_sentence", 0.28)),
@@ -144,8 +173,9 @@ def job(payload):
             highlight=bool(o.get("highlight", False)),
             highlight_colour=o.get("highlight_colour", "#FFD400"),
             whisper=o.get("whisper", "base"),
-            chunk=o.get("chunk", "slide"),
+            chunk=chunk_for(payload),
             design_width=int(o.get("design_width", 1536)),
+            format=o.get("format", "video") if o.get("format") in d.FORMATS else "video",
             no_subs=bool(o.get("no_subs", False)),
             no_fades=not bool(o.get("with_fades", True)),
             music=(str(next(iter(sorted(MUSIC.glob("*"))))) 
@@ -154,6 +184,9 @@ def job(payload):
             chrome=None,
             ffmpeg=o.get("ffmpeg", "ffmpeg"),
         )
+        if original_subs:
+            # No word can be highlighted across two languages.
+            opts.align_words = opts.highlight = False
         if opts.gap_slide < 2 * opts.fade:
             raise RuntimeError("Slide gap must be at least twice the fade length, "
                                "or the fade would cover speech.")
@@ -167,7 +200,8 @@ def job(payload):
             log("using the voice already generated, no need to synthesize again")
         else:
             log("generating speech")
-            audio = d.build_audio(d.parse_script(opts.script), opts, log)
+            audio = d.build_audio(d.parse_script(opts.voice_script or opts.script),
+                                  opts, log, PIECES)
             store_voice(key, audio)
         result = d.run(opts, log, audio=audio)
         JOB["result"] = result
@@ -185,16 +219,18 @@ def voice_job(payload):
     """Generate only the speech, so the music can be judged against it."""
     try:
         WORK.mkdir(exist_ok=True)
-        (WORK / "voiceover.txt").write_text(payload["script"], encoding="utf-8")
+        (WORK / "voiceover.txt").write_text(payload.get("voice_script") or payload["script"],
+                                            encoding="utf-8")
         o = payload.get("options", {})
         opts = Namespace(
             script=str(WORK / "voiceover.txt"),
             voice=o.get("voice", "af_sky"), speed=float(o.get("speed", 1.0)),
             kokoro=o.get("kokoro") or kokoro.convert_url(),
+            pronunciations=str(d.PRONUNCIATIONS),
             lead_in=float(o.get("lead_in", 0.6)), tail=float(o.get("tail", 1.2)),
             gap_sentence=float(o.get("gap_sentence", 0.28)),
             gap_slide=float(o.get("gap_slide", 1.1)),
-            chunk=o.get("chunk", "slide"))
+            chunk=chunk_for(payload))
         key = voice_key(payload)
         if cached_voice(key):
             log("that voice is already generated")
@@ -208,7 +244,7 @@ def voice_job(payload):
         log(f"{len(slides)} slides, {sentences} sentences" +
             (f", sent to Kokoro {len(slides)} slides at a time"
              if opts.chunk == "slide" else ", sent one sentence at a time"))
-        audio = d.build_audio(slides, opts, log)
+        audio = d.build_audio(slides, opts, log, PIECES)
         store_voice(key, audio)
         JOB["result"] = {"cached": False, "total": audio[3]}
         log(f"voice ready: {audio[3]:.1f}s")
@@ -325,7 +361,11 @@ class Handler(BaseHTTPRequestHandler):
             asset = HERE / Path(route).name
             return self.send_file(asset, "image/svg+xml")
         if route == "/voices":
-            return self.send(200, json.dumps({"voices": VOICES}))
+            return self.send(200, json.dumps({"voices": VOICES, "languages": d.LANGUAGES}))
+        if route == "/formats":
+            return self.send(200, json.dumps(d.FORMATS))
+        if route == "/ai/providers":
+            return self.send(200, json.dumps(ai.PROVIDERS))
         if route == "/status":
             return self.send(200, json.dumps(JOB))
         if route == "/kokoro":
@@ -374,6 +414,12 @@ class Handler(BaseHTTPRequestHandler):
                  "voice_ready": (CACHE / "voice.wav").exists()}))
         if route == "/subs":
             return self.send_file(WORK / "build" / "subs.srt", "text/plain; charset=utf-8")
+        if route == "/pronunciations":
+            return self.send(200, json.dumps(d.load_pronunciations(), ensure_ascii=False))
+        if route == "/chapters":
+            return self.send_file(WORK / "video-chapters.txt", "text/plain; charset=utf-8")
+        if route == "/thumbnail":
+            return self.send_file(WORK / "video-thumbnail.jpg", "image/jpeg")
         return self.send(404, json.dumps({"error": "no such route"}))
 
     def do_POST(self):
@@ -398,11 +444,102 @@ class Handler(BaseHTTPRequestHandler):
                 "missing": missing,
                 # No markup means the plain voiceover-script.md was uploaded by
                 # mistake: it builds fine but Kokoro mispronounces dbt, AI, query.
-                "has_markup": bool(d.MARKUP.search(script)),
+                # Words the pronunciation list covers count as marked up.
+                "has_markup": bool(d.MARKUP.search(
+                    d.apply_pronunciations(script, d.load_pronunciations()))),
                 "script_slides": len(parsed),
                 "sentences": [len(d.split_sentences(s["paragraph"])) for s in parsed],
                 "labels": [s["label"] for s in parsed],
+                "steps": sum(len(s["steps"]) for s in parsed),
             }))
+
+        # The AI routes get the user's API key in the body of each request. It is
+        # used for that call only: never logged, never written to disk.
+        if route == "/ai/test":
+            try:
+                reply = ai.complete(payload.get("ai", {}), "Reply with the single word OK.",
+                                    "Are you there?", timeout=60)
+                return self.send(200, json.dumps({"ok": True, "reply": reply.strip()[:80]}))
+            except ai.AIError as exc:
+                return self.send(200, json.dumps({"ok": False, "error": str(exc)}))
+
+        if route == "/ai/deck":
+            try:
+                count = max(2, min(15, int(payload.get("slides", 6))))
+                topic = (payload.get("topic") or "").strip()
+                if not topic:
+                    raise ai.AIError("Write the topic or paste your notes first.")
+                deck = ai.write_deck(payload.get("ai", {}), topic, count,
+                                     payload.get("format", "video"))
+                return self.send(200, json.dumps({"ok": True, "deck": deck}))
+            except ai.AIError as exc:
+                return self.send(200, json.dumps({"ok": False, "error": str(exc)}))
+
+        if route == "/ai/translate":
+            # The script always; the slides too when asked. An AI deck is
+            # translated as its data and drawn again, a hand-made deck has its
+            # visible text swapped and everything else left alone.
+            try:
+                target = d.LANGUAGES.get(payload.get("target", ""))
+                if not target:
+                    raise ai.AIError("Choose the language to translate into.")
+                settings = payload.get("ai", {})
+                WORK.mkdir(exist_ok=True)
+                probe = WORK / "_translate.txt"
+                probe.write_text(payload.get("script", ""), encoding="utf-8")
+                original = d.parse_script(probe)
+                if not original:
+                    raise ai.AIError("Load the voiceover script first.")
+                request = [{"label": s["label"],
+                            "sentences": [d.strip_markup(x)
+                                          for x in d.split_sentences(s["paragraph"])]}
+                           for s in original]
+                done = ai.translate_script(settings, request, target["name"],
+                                           lambda text: len(d.split_sentences(text)))
+                result = {"ok": True, "script": ai.translated_script(original, done),
+                          "deck": None}
+                if payload.get("slides"):
+                    if payload.get("ai_deck"):
+                        result["deck"] = deck_template.render_deck(
+                            ai.translate_deck(settings, payload["ai_deck"], target["name"]),
+                            target["whisper"])
+                    else:
+                        result["deck"] = deck_template.translate_html(
+                            payload.get("deck", ""),
+                            lambda texts: ai.translate_texts(settings, texts, target["name"]))
+                return self.send(200, json.dumps(result, ensure_ascii=False))
+            except ai.AIError as exc:
+                return self.send(200, json.dumps({"ok": False, "error": str(exc)}))
+
+        if route == "/ai/render":
+            deck = payload.get("deck") or {}
+            if not deck.get("slides"):
+                return self.send(400, json.dumps({"error": "No slides to render."}))
+            return self.send(200, json.dumps({
+                "html": deck_template.render_deck(deck, payload.get("lang", "en")),
+                "script": deck_template.render_script(deck),
+                "problem": ai.deck_problem(deck, len(deck["slides"]))}))
+
+        if route == "/pronunciations":
+            entries = {w.strip(): s.strip() for w, s in payload.get("entries", {}).items()
+                       if w.strip() and s.strip()}
+            d.PRONUNCIATIONS.write_text(
+                json.dumps(entries, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+            return self.send(200, json.dumps({"ok": True, "count": len(entries)}))
+
+        if route == "/pronounce":
+            # Speaks one word with its sound, so a pronunciation can be checked by ear.
+            word, sound = payload.get("word", "").strip(), payload.get("sound", "").strip()
+            if not (word and sound):
+                return self.send(400, json.dumps({"error": "Fill in the word and its sound."}))
+            text = d.apply_pronunciations(word, {word: sound})
+            url = payload.get("kokoro") or kokoro.convert_url()
+            try:
+                wav = d.synthesize(text, payload.get("voice", "af_sky"),
+                                   float(payload.get("speed", 1.0)), url)
+            except Exception as exc:
+                return self.send(502, json.dumps({"error": f"Kokoro did not answer: {exc}"}))
+            return self.send(200, wav, "audio/wav")
 
         if route == "/capcut/folder":
             # Opens the OS folder chooser; blocks until the user picks.
@@ -427,6 +564,9 @@ class Handler(BaseHTTPRequestHandler):
                     music=str(track) if (track := current_music()) else None,
                     music_duration=media_seconds(track) if track else 0.0,
                     music_volume=d.gain(float(payload.get("music_db", -20.0))),
+                    size=tuple(r.get("size", (1920, 1080))),
+                    margin_v=r.get("margin_v", 20),
+                    fade_after=r.get("fade_after"),
                     log=lambda m: None)
                 return self.send(200, json.dumps({"ok": True, **out}))
             except Exception as exc:

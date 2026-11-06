@@ -26,8 +26,17 @@
   label{display:block;font-size:12px;color:var(--muted);margin-bottom:5px}
   input[type=file]{width:100%;padding:9px;background:#05060a;border:1px dashed var(--line);
                    border-radius:6px;color:var(--muted);font-size:13px}
-  input[type=number],input[type=text],select{width:100%;padding:8px 10px;background:#05060a;
-      border:1px solid var(--line);border-radius:6px;color:var(--text);font-size:13px}
+  input[type=number],input[type=text],input[type=password],select{width:100%;padding:8px 10px;
+      background:#05060a;border:1px solid var(--line);border-radius:6px;color:var(--text);
+      font-size:13px}
+  .ta{width:100%;background:#05060a;color:var(--text);border:1px solid var(--line);
+      border-radius:6px;padding:9px 10px;font:13px/1.5 "Segoe UI",system-ui,sans-serif;
+      resize:vertical}
+  .card{border:1px solid var(--line);border-radius:8px;padding:14px;margin-top:12px;
+        background:#05060a}
+  .card .ta,.card input{background:var(--panel)}
+  .card h4{margin:0 0 10px;font-size:12px;color:var(--orange2);text-transform:uppercase;
+           letter-spacing:.08em}
   .grid{display:grid;gap:12px}
   .g2{grid-template-columns:1fr 1fr}
   .g3{grid-template-columns:repeat(3,1fr)}
@@ -92,6 +101,16 @@
   .check div:last-child{border-bottom:0}
   .check .k{color:var(--muted);width:172px;flex:none}
   .check .v{color:var(--text);font-weight:600}
+  /* format picker: one card per shape, drawn at its own proportions */
+  .fmt{display:flex;flex-direction:column;align-items:center;gap:7px;padding:12px 8px;
+       background:#05060a;border:1px solid var(--line);border-radius:8px;cursor:pointer;
+       color:var(--muted);font:inherit;text-align:center}
+  .fmt:hover{border-color:rgba(255,255,255,.3)}
+  .fmt.on{border-color:var(--orange);color:var(--text)}
+  .fmt .shape{border:2px solid currentColor;border-radius:3px}
+  .fmt.on .shape{border-color:var(--orange);background:rgba(255,122,26,.15)}
+  .fmt b{font-size:13px}
+  .fmt small{font-size:11px;line-height:1.35}
 </style>
 </head>
 <body>
@@ -113,6 +132,49 @@
   </div>
   <p class="sub">Slide deck plus voiceover script in, finished MP4 out. Fades, timing and
      subtitles are derived from the narration itself.</p>
+
+  <div class="panel">
+    <h2>Write with AI &middot; optional</h2>
+    <p class="hint" style="margin:-6px 0 15px">Give a topic or paste your notes, and an AI writes
+       the slides and the narration for you to check. It uses <b>your own API key</b>, so the AI
+       service bills you directly and SlideCast costs nothing. The key stays in this page only: it is
+       never saved, and reloading the page forgets it.</p>
+    <div class="grid g3">
+      <div><label>AI service</label><select id="aiProvider"></select></div>
+      <div><label>Model</label><input type="text" id="aiModel"></div>
+      <div id="aiBaseWrap" hidden><label>Address</label>
+        <input type="text" id="aiBase" placeholder="e.g. http://localhost:11434/v1"></div>
+    </div>
+    <div class="grid g3" style="margin-top:12px">
+      <div style="grid-column:span 2"><label>API key</label>
+        <input type="password" id="aiKey" autocomplete="off" spellcheck="false"
+               placeholder="paste your key (not needed for a local Ollama or LM Studio)"></div>
+      <div><label>&nbsp;</label>
+        <button class="mini" id="aiTest" style="width:100%;padding:9px">Test the key</button></div>
+    </div>
+    <label style="margin-top:14px">Topic or notes</label>
+    <textarea class="ta" id="aiTopic" rows="5"
+      placeholder="e.g. Why local-first apps are coming back: speed, privacy, working offline."></textarea>
+    <div class="grid g4" style="margin-top:12px">
+      <div><label>Number of slides</label>
+        <input type="number" id="aiSlides" value="6" min="2" max="15"></div>
+    </div>
+    <p class="hint">The slides are made in the shape picked under Build &rarr; Format, and fit any
+       of the four.</p>
+    <div class="row" style="margin-top:6px">
+      <button class="btn primary" id="aiWrite">Write the deck</button>
+    </div>
+    <div id="aiStatus"></div>
+    <div id="aiReview" hidden>
+      <p class="hint" style="margin-top:16px">Check and edit everything below, then press
+         <b>Use this</b>. On a bullet slide, <code>[show]</code> in the narration marks the sentence
+         where the next bullet appears, so keep one per bullet.</p>
+      <div id="aiSlidesList"></div>
+      <div class="row" style="margin-top:14px">
+        <button class="btn primary" id="aiUse">Use this</button>
+      </div>
+    </div>
+  </div>
 
   <div class="panel">
     <h2>1 &middot; Inputs</h2>
@@ -147,6 +209,27 @@
 
   <div class="panel">
     <h2>3 &middot; Voice</h2>
+    <div class="grid g3" style="margin-bottom:6px">
+      <div><label>Translate the narration into</label>
+        <select id="translateTo"><option value="">Don't translate</option></select></div>
+      <div id="subsLangWrap" hidden><label>Subtitles</label>
+        <select id="subsLang">
+          <option value="translated" selected>In the new language</option>
+          <option value="original">In the original language</option>
+        </select></div>
+      <div id="slidesLangWrap" hidden><label>Slides</label>
+        <select id="slidesLang">
+          <option value="translated" selected>Translated</option>
+          <option value="original">Keep the original</option>
+        </select></div>
+    </div>
+    <div class="row" id="translateRow" hidden style="margin:8px 0 4px">
+      <button class="mini" id="translateGo" style="padding:9px 16px">Translate</button>
+    </div>
+    <div id="translateStatus"></div>
+    <p class="hint" style="margin-bottom:14px">Translating uses the AI service and key from
+       <b>Write with AI</b>. Pick what changes language: the voice always does; the subtitles
+       and the slides can stay in the original.</p>
     <div class="grid g3">
       <div><label>Kokoro voice</label><select id="voice"></select></div>
       <div><label>Speed</label><input type="number" id="speed" value="1.0" step="0.05" min="0.5" max="2"></div>
@@ -167,6 +250,15 @@
        never run Kokoro, it stays empty until you start it, and the container SlideCast creates
        publishes <b>7860</b>. Type your own URL to override it &mdash; the status line below then
        reports on that URL rather than on the container.</p>
+    <label style="margin-top:16px">Pronunciations</label>
+    <p class="hint" style="margin:0 0 10px">Words Kokoro gets wrong, with the sound to use instead.
+       Every match in the script gets its markup added automatically, so you can write the script
+       as plain text. Matching ignores upper and lower case. English voices only.</p>
+    <div id="pronList"></div>
+    <div class="row" style="margin-top:8px">
+      <button class="mini" id="pronAdd">Add a word</button>
+      <span id="pronSaved" class="hint" style="margin:0"></span>
+    </div>
     <div class="row" style="margin-top:12px">
       <button class="mini" id="genVoice2" style="padding:10px 18px">Generate the voice</button>
       <button class="mini" id="playVoice2" style="padding:10px 18px">Play the voice</button>
@@ -228,7 +320,7 @@
           <option value="Palatino Linotype" style="font-family:'Palatino Linotype', serif;font-size:15px">Palatino Linotype</option>
           <option value="Courier New" style="font-family:'Courier New', monospace;font-size:15px">Courier New</option>
         </select></div>
-      <div><label>Size (px at 1080p)</label><input type="number" id="font_size" value="54"></div>
+      <div><label>Size (px in the video)</label><input type="number" id="font_size" value="54"></div>
       <div><label>Black outline</label><input type="number" id="outline" value="4"></div>
       <div><label>Height off bottom</label><input type="number" id="margin_v" value="20"></div>
     </div>
@@ -289,9 +381,12 @@
 
   <div class="panel">
     <h2>8 &middot; Build</h2>
+    <label>Format</label>
+    <div id="formatPick" class="grid g4" style="margin-bottom:6px"></div>
+    <div id="formatNote" style="margin-bottom:16px"></div>
     <div class="grid g4" style="margin-bottom:16px">
       <div><label>Frame rate (fps)</label><input type="number" id="fps" value="30"></div>
-      <div><label>Deck design width (px)</label>
+      <div id="designWidthWrap"><label>Deck design width (px)</label>
         <select id="design_width">
           <option value="1536" selected>1536 &mdash; browser at 125% scaling</option>
           <option value="1920">1920 &mdash; true 1:1</option>
@@ -305,6 +400,21 @@
       <button class="btn primary" id="go" disabled>Build video</button>
       <button class="btn secondary" id="dl" hidden>Download MP4</button>
       <button class="btn secondary" id="dlsub" hidden>Download .srt</button>
+    </div>
+    <div id="publish" hidden>
+      <label style="margin-top:16px">For YouTube</label>
+      <pre id="chapterText" style="margin-top:0"></pre>
+      <div class="row" style="margin-top:8px">
+        <button class="mini" id="copyChapters">Copy chapters</button>
+        <a class="mini" id="dlChapters" href="/chapters" download="chapters.txt"
+           style="text-decoration:none">Download chapters</a>
+        <a class="mini" id="dlThumb" href="/thumbnail" download="thumbnail.jpg"
+           style="text-decoration:none">Download thumbnail</a>
+      </div>
+      <div id="chapterNote"></div>
+      <p class="hint">Paste the chapters into the video's description and YouTube turns them
+         into chapters on the timeline. The thumbnail is the first slide with everything on it
+         showing.</p>
     </div>
     <div id="resultNote"></div>
     <pre id="log" hidden></pre>
@@ -400,10 +510,25 @@ let restoring = false, saveTimer = null, kokoroOK = false, buildRunning = false;
 // The most recent build, and whether it has been downloaded.
 let lastResult = null;
 
+let ALL_VOICES = [], LANGUAGES = {};
 const voicesReady = fetch("/voices").then(r => r.json()).then(d => {
-  $("voice").innerHTML = d.voices.map(v =>
-    `<option${v === "af_sky" ? " selected" : ""}>${v}</option>`).join("");
+  ALL_VOICES = d.voices;
+  LANGUAGES = d.languages || {};
+  $("translateTo").insertAdjacentHTML("beforeend", Object.entries(LANGUAGES).map(([k, l]) =>
+    `<option value="${k}">${l.name}</option>`).join(""));
+  fillVoices();
 });
+
+/* A translation is spoken by a voice of that language, so only those are offered. */
+function fillVoices() {
+  const lang = $("translateTo").value, current = $("voice").value || "af_sky";
+  const voices = lang ? ALL_VOICES.filter(v => v[0] === lang) : ALL_VOICES;
+  const pick = voices.includes(current) ? current : voices[0];
+  $("voice").innerHTML = voices.map(v => {
+    const name = (LANGUAGES[v[0]] || {}).name || "";
+    return `<option value="${v}"${v === pick ? " selected" : ""}>${v} &mdash; ${name}</option>`;
+  }).join("");
+}
 
 /* Everything you picked is mirrored to the server, so a refresh - or a restart
    of the server - does not throw away your inputs or an unsaved build. */
@@ -413,6 +538,7 @@ function saveSession() {
   saveTimer = setTimeout(() => {
     fetch("/session", {method: "POST", body: JSON.stringify(
       {deckText, scriptText, deckName, scriptName, assetFiles, assetNames,
+       aiDeck, deckFromAI, aiTopic: $("aiTopic").value, translation,
        options: collectOptions()})}).catch(() => {});
   }, 400);
 }
@@ -428,9 +554,236 @@ document.addEventListener("input", e => {
 
 /* The fade lives inside the pause between slides, so the two panels are linked.
    Show that relationship rather than only failing at build time. */
-/* 1080p subtitles shown at panel width, so the sample is the real proportion. */
+/* ---- format: the shape of the video ---- */
+let FORMATS = {}, currentFormat = "video";
+// True while the deck came from the AI writer, whose design fits every format.
+let deckFromAI = false;
+
+const formatsReady = fetch("/formats").then(r => r.json()).then(f => {
+  FORMATS = f;
+  renderFormats();
+});
+
+function renderFormats() {
+  $("formatPick").innerHTML = Object.entries(FORMATS).map(([name, f]) => {
+    const [w, h] = f.size, scale = 34 / Math.max(w, h);
+    const title = name[0].toUpperCase() + name.slice(1);
+    return `<button type="button" class="fmt${name === currentFormat ? " on" : ""}"
+              data-format="${name}">
+      <span class="shape" style="width:${Math.round(w * scale)}px;height:${Math.round(h * scale)}px"></span>
+      <b>${title}</b><small>${w}&times;${h}</small></button>`;
+  }).join("");
+  document.querySelectorAll(".fmt").forEach(el => {
+    el.onclick = () => setFormat(el.dataset.format, true);
+  });
+  updateFormatNote();
+}
+
+/* Picking a format resets the subtitle settings to the ones that suit it;
+   they can still be changed afterwards. */
+function setFormat(name, applyDefaults) {
+  if (!FORMATS[name]) return;
+  currentFormat = name;
+  if (applyDefaults) {
+    const f = FORMATS[name];
+    $("font_size").value = f.font_size;
+    $("max_chars").value = f.max_chars;
+    $("margin_v").value = f.margin_v;
+  }
+  renderFormats();
+  updateSubPreview();
+  saveSession();
+}
+
+function updateFormatNote() {
+  const f = FORMATS[currentFormat];
+  if (!f) return;
+  $("designWidthWrap").hidden = currentFormat !== "video";
+  const notes = [["", `<b>${f.label}</b>. The slides are rendered at ${f.size[0]}&times;${f.size[1]},
+    so they fill the whole frame with no bars, ready to upload.`]];
+  if (currentFormat !== "video" && deckText && !deckFromAI)
+    notes.push(["warn", `This deck was most likely designed for a wide screen. It will only fill
+      a ${currentFormat} frame properly if its own layout adapts to the shape. Decks made with
+      <b>Write with AI</b> fit every format.`]);
+  $("formatNote").innerHTML = notes.map(([c, h]) =>
+    `<div class="status ${c}">${h}</div>`).join("");
+}
+
+/* ---- write with AI, on the user's own key ---- */
+let AI_PROVIDERS = {}, aiDeck = null;
+
+const aiReady = fetch("/ai/providers").then(r => r.json()).then(p => {
+  AI_PROVIDERS = p;
+  $("aiProvider").innerHTML = Object.entries(p).map(([k, v]) =>
+    `<option value="${k}">${v.label}</option>`).join("");
+  aiProviderChanged(true);
+});
+
+/* The key lives only in this field. It is sent with each AI request and is
+   deliberately left out of collectOptions, so it never reaches session.json. */
+function aiSettings() {
+  return {provider: $("aiProvider").value, model: $("aiModel").value.trim(),
+          base_url: $("aiBase").value.trim(), key: $("aiKey").value.trim()};
+}
+
+function aiProviderChanged(keepModel) {
+  const p = AI_PROVIDERS[$("aiProvider").value] || {};
+  if (!keepModel || !$("aiModel").value) $("aiModel").value = p.model || "";
+  $("aiModel").placeholder = p.model ? "" : "e.g. llama3.3 or openai/gpt-6-astra";
+  $("aiBaseWrap").hidden = $("aiProvider").value !== "compatible";
+}
+$("aiProvider").onchange = () => { aiProviderChanged(false); saveSession(); };
+
+function aiNote(cls, html) {
+  $("aiStatus").innerHTML = `<div class="status ${cls}">${html}</div>`;
+}
+
+$("aiTest").onclick = async () => {
+  $("aiTest").disabled = true;
+  aiNote("", "Asking the AI service&hellip;");
+  const r = await fetch("/ai/test", {method: "POST", body: JSON.stringify({ai: aiSettings()})})
+    .then(x => x.json()).catch(() => ({ok: false, error: "SlideCast did not answer."}));
+  $("aiTest").disabled = false;
+  aiNote(r.ok ? "ok" : "bad", r.ok
+    ? `The key works. The model answered: <b>${escapeAttr(r.reply)}</b>`
+    : escapeAttr(r.error));
+};
+
+$("aiWrite").onclick = async () => {
+  $("aiWrite").disabled = true;
+  aiNote("warn", "Writing the deck. This usually takes under a minute&hellip;");
+  const r = await fetch("/ai/deck", {method: "POST", body: JSON.stringify(
+    {ai: aiSettings(), topic: $("aiTopic").value, slides: num("aiSlides"),
+     format: currentFormat})})
+    .then(x => x.json()).catch(() => ({ok: false, error: "SlideCast did not answer."}));
+  $("aiWrite").disabled = false;
+  if (!r.ok) return aiNote("bad", escapeAttr(r.error));
+  aiDeck = r.deck;
+  aiNote("ok", `Written: <b>${aiDeck.slides.length}</b> slides. Check them below.`);
+  renderAiReview();
+  saveSession();
+};
+
+/* Every field edits aiDeck directly, so Use this sends exactly what is shown. */
+function renderAiReview() {
+  $("aiReview").hidden = !aiDeck;
+  if (!aiDeck) return;
+  $("aiSlidesList").innerHTML = aiDeck.slides.map((s, i) => `
+    <div class="card">
+      <h4>Slide ${i + 1} &middot; ${s.kind}</h4>
+      <div class="grid g3">
+        <div><label>Label</label><input type="text" data-i="${i}" data-f="label"
+             value="${escapeAttr(s.label || "")}"></div>
+        <div style="grid-column:span 2"><label>Heading</label><input type="text" data-i="${i}"
+             data-f="heading" value="${escapeAttr(s.heading || "")}"></div>
+      </div>
+      <label style="margin-top:10px">Supporting line</label>
+      <input type="text" data-i="${i}" data-f="subheading" value="${escapeAttr(s.subheading || "")}">
+      ${s.kind === "bullets" ? `<label style="margin-top:10px">Bullets, one per line</label>
+        <textarea class="ta" rows="${(s.bullets || []).length + 1}" data-i="${i}"
+          data-f="bullets">${escapeAttr((s.bullets || []).join("\n"))}</textarea>` : ""}
+      <label style="margin-top:10px">Narration</label>
+      <textarea class="ta" rows="4" data-i="${i}" data-f="narration">${escapeAttr(s.narration || "")}</textarea>
+    </div>`).join("");
+  document.querySelectorAll("#aiSlidesList [data-f]").forEach(el => {
+    el.oninput = () => {
+      const slide = aiDeck.slides[el.dataset.i];
+      slide[el.dataset.f] = el.dataset.f === "bullets"
+        ? el.value.split("\n").map(x => x.trim()).filter(Boolean) : el.value;
+      saveSession();
+    };
+  });
+}
+
+$("aiUse").onclick = async () => {
+  const r = await fetch("/ai/render", {method: "POST", body: JSON.stringify({deck: aiDeck})})
+    .then(x => x.json()).catch(() => ({}));
+  if (!r.html) return aiNote("bad", "Could not turn that into slides.");
+  deckText = r.html; scriptText = r.script;
+  deckName = "ai-deck.html"; scriptName = "ai-voiceover.txt";
+  assetFiles = {}; assetNames = {};
+  deckFromAI = true;
+  aiNote(r.problem ? "warn" : "ok", r.problem
+    ? `Loaded into Inputs, but check this: ${escapeAttr(r.problem)}.`
+    : "Loaded into Inputs below. Pick a voice and build, or keep editing and press Use this again.");
+  await inspect();
+};
+
+/* ---- translation: the voice, and optionally subtitles and slides ---- */
+let translation = null;   // {lang, slides, source, sourceDeck, script, deck}
+
+function translationWanted() {
+  return $("translateTo").value
+    ? {lang: $("translateTo").value, slides: $("slidesLang").value === "translated",
+       subtitles: $("subsLang").value}
+    : null;
+}
+
+/* A translation only counts for the inputs and choices it was made from. */
+function translationReady() {
+  const want = translationWanted();
+  return !!(want && translation && translation.lang === want.lang
+    && translation.slides === want.slides && translation.source === scriptText
+    && (!want.slides || translation.sourceDeck === deckText));
+}
+
+function updateTranslationUI() {
+  const want = translationWanted();
+  $("subsLangWrap").hidden = $("slidesLangWrap").hidden = $("translateRow").hidden = !want;
+  if (!want) { $("translateStatus").innerHTML = ""; return; }
+  const name = LANGUAGES[want.lang].name;
+  const notes = [];
+  if (translationReady())
+    notes.push(["ok", `Translated into <b>${name}</b>. The build uses it.`]);
+  else
+    notes.push(["warn", translation && translation.lang === want.lang
+      ? "The script, slides or choices changed since translating. Press Translate again."
+      : `Press <b>Translate</b> to translate into ${name} before building.`]);
+  if (want.subtitles === "original")
+    notes.push(["", `The voice will speak ${name} with subtitles in the original language. Each
+      sentence is recorded on its own so the subtitles line up, and the spoken word cannot be
+      highlighted.`]);
+  $("translateStatus").innerHTML = notes.map(([c, h]) =>
+    `<div class="status ${c}">${h}</div>`).join("");
+}
+
+$("translateTo").addEventListener("change", () => { fillVoices(); updateTranslationUI(); });
+$("subsLang").addEventListener("change", updateTranslationUI);
+$("slidesLang").addEventListener("change", updateTranslationUI);
+
+$("translateGo").onclick = async () => {
+  const want = translationWanted();
+  if (!scriptText) return aiNoteIn("translateStatus", "bad", "Load the voiceover script first.");
+  $("translateGo").disabled = true;
+  aiNoteIn("translateStatus", "warn", `Translating into ${LANGUAGES[want.lang].name}&hellip;`);
+  const r = await fetch("/ai/translate", {method: "POST", body: JSON.stringify(
+    {ai: aiSettings(), target: want.lang, script: scriptText, slides: want.slides,
+     deck: deckText, ai_deck: deckFromAI ? aiDeck : null})})
+    .then(x => x.json()).catch(() => ({ok: false, error: "SlideCast did not answer."}));
+  $("translateGo").disabled = false;
+  if (!r.ok) return aiNoteIn("translateStatus", "bad", escapeAttr(r.error));
+  translation = {lang: want.lang, slides: want.slides, source: scriptText,
+                 sourceDeck: deckText, script: r.script, deck: r.deck};
+  updateTranslationUI();
+  saveSession();
+};
+
+function aiNoteIn(id, cls, html) {
+  $(id).innerHTML = `<div class="status ${cls}">${html}</div>`;
+}
+
+/* What a build or a voice job sends on top of the inputs when translating. */
+function translationPayload() {
+  const want = translationWanted();
+  if (!want || !translationReady()) return {};
+  return {voice_script: translation.script, subtitles: want.subtitles,
+          ...(want.slides && translation.deck ? {deck: translation.deck} : {})};
+}
+
+/* Subtitles shown at panel width, so the sample is the real proportion. */
 function updateSubPreview() {
-  const scale = Math.min(1, ($("subPreview").clientWidth || 880) / 1920);
+  const frameWidth = (FORMATS[currentFormat] || {size: [1920]}).size[0];
+  const scale = Math.min(1, ($("subPreview").clientWidth || 880) / frameWidth);
   const size = (parseFloat($("font_size").value) || 54) * scale;
   const outline = (parseFloat($("outline").value) || 0) * scale;
   const preset = PRESETS[$("preset").value] || {text: "#ffffff", outline: "#000000"};
@@ -479,6 +832,7 @@ $("deck").onchange = async e => {
   const f = e.target.files[0]; if (!f) return;
   deckText = await readText(f); deckName = f.name;
   assetFiles = {}; assetNames = {};
+  deckFromAI = false;
   inspect();
 };
 $("script").onchange = async e => {
@@ -488,6 +842,7 @@ $("script").onchange = async e => {
 };
 $("deckRemove").onclick = () => {
   deckText = ""; deckName = ""; missing = []; assetFiles = {}; assetNames = {};
+  deckFromAI = false;
   $("deck").value = ""; inspect();
 };
 $("scriptRemove").onclick = () => {
@@ -521,18 +876,22 @@ async function inspect() {
   } else {
     const total = (r.sentences || []).reduce((a, b) => a + b, 0);
     notes.push(["ok", `<b>${r.slides}</b> slides matched, <b>${total}</b> sentences to speak.` +
+      (r.steps ? ` <b>${r.steps}</b> item(s) appear as they are spoken.` : "") +
       (missing.length ? ` ${missing.length} screenshot(s) still needed.` : "")]);
     ready = true;
   }
-  if (scriptText && !r.has_markup) {
-    notes.push(["warn", `This script has <b>no Kokoro markup</b>, so it looks like the plain
-      <code>voiceover-script.md</code>. It will build, but Kokoro will read <b>dbt</b> as a word and
-      mispronounce <b>AI</b>, <b>query</b> and <b>status</b>. Upload
+  // The warning catches the plain script uploaded by mistake, which an AI deck cannot be.
+  if (scriptText && !r.has_markup && !deckFromAI) {
+    notes.push(["warn", `This script has <b>no Kokoro markup</b>, and none of the words in
+      <b>Pronunciations</b> appear in it either. It will build, but words like <b>dbt</b> or
+      <b>AI</b> may be mispronounced. Add them under Voice &rarr; Pronunciations, or upload
       <code>voiceover-kokoro.txt</code> instead.`]);
   }
   $("inspect").innerHTML = notes.map(([c, h]) =>
     `<div class="status ${c}">${h}</div>`).join("");
   $("go").disabled = !ready;
+  updateFormatNote();
+  updateTranslationUI();
   saveSession();
 }
 
@@ -586,6 +945,76 @@ function renderAssets() {
   });
 }
 
+/* ---- pronunciations: saved to pronunciations.json as you edit ---- */
+let pronunciations = [];   // [[word, sound], ...] in display order
+let pronTimer = null;
+
+function renderPronunciations() {
+  $("pronList").innerHTML = pronunciations.map(([word, sound], i) => `
+    <div class="asset" style="grid-template-columns:1fr 1.3fr 80px 80px">
+      <input type="text" class="pw" data-i="${i}" value="${escapeAttr(word)}" placeholder="word">
+      <input type="text" class="ps" data-i="${i}" value="${escapeAttr(sound)}"
+             placeholder="sound, e.g. /dˌibˌitˈi/">
+      <button class="mini ph" data-i="${i}">Hear it</button>
+      <button class="mini danger pr" data-i="${i}">Remove</button>
+    </div>`).join("");
+  document.querySelectorAll(".pw, .ps").forEach(el => {
+    el.oninput = () => {
+      pronunciations[el.dataset.i][el.classList.contains("pw") ? 0 : 1] = el.value;
+      savePronunciations();
+    };
+  });
+  document.querySelectorAll(".pr").forEach(el => {
+    el.onclick = () => {
+      pronunciations.splice(el.dataset.i, 1);
+      renderPronunciations();
+      savePronunciations();
+    };
+  });
+  document.querySelectorAll(".ph").forEach(el => {
+    el.onclick = () => hearPronunciation(el, ...pronunciations[el.dataset.i]);
+  });
+}
+
+function escapeAttr(s) {
+  return String(s).replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;");
+}
+
+function savePronunciations() {
+  clearTimeout(pronTimer);
+  pronTimer = setTimeout(async () => {
+    await fetch("/pronunciations", {method: "POST",
+      body: JSON.stringify({entries: Object.fromEntries(pronunciations)})});
+    $("pronSaved").textContent = "Saved.";
+    if (scriptText) inspect();
+  }, 500);
+}
+
+async function hearPronunciation(button, word, sound) {
+  button.disabled = true;
+  const r = await fetch("/pronounce", {method: "POST", body: JSON.stringify(
+    {word, sound, voice: $("voice").value, speed: num("speed"), kokoro: $("kokoro").value})})
+    .catch(() => null);
+  button.disabled = false;
+  if (!r || !r.ok) {
+    const e = r ? await r.json().catch(() => ({})) : {};
+    $("pronSaved").textContent = e.error || "Kokoro did not answer.";
+    return;
+  }
+  new Audio(URL.createObjectURL(await r.blob())).play();
+}
+
+$("pronAdd").onclick = () => {
+  pronunciations.push(["", ""]);
+  renderPronunciations();
+  $("pronList").querySelector(`.pw[data-i="${pronunciations.length - 1}"]`).focus();
+};
+
+fetch("/pronunciations").then(r => r.json()).then(entries => {
+  pronunciations = Object.entries(entries);
+  renderPronunciations();
+}).catch(() => {});
+
 /* ---- script editor ---- */
 $("scriptEdit").onclick = () => {
   $("editBox").value = scriptText;
@@ -623,6 +1052,10 @@ function collectOptions() {
     music_db: num("music_db"),
     chunk: $("chunk").value,
     design_width: num("design_width"),
+    format: currentFormat,
+    ai_provider: $("aiProvider").value, ai_model: $("aiModel").value, ai_base: $("aiBase").value,
+    translate_to: $("translateTo").value, subs_lang: $("subsLang").value,
+    slides_lang: $("slidesLang").value,
     text_colour: PRESETS[$("preset").value].text,
     outline_colour: PRESETS[$("preset").value].outline,
     outline: PRESETS[$("preset").value].width === undefined
@@ -641,12 +1074,17 @@ function preflight() {
   const o = collectOptions();
   const sentences = (report.sentences || []).reduce((a, b) => a + b, 0);
   const supplied = Object.keys(assetFiles).length;
+  const f = FORMATS[currentFormat];
   const rows = [
+    ["Format", `${currentFormat} &mdash; ${f.size[0]}&times;${f.size[1]}`],
     ["Deck", `${deckName} &mdash; ${report.slides} slides`],
     ["Script", `${scriptName} &mdash; ${sentences} sentences to speak`],
     ["Screenshots", missing.length
         ? `${supplied} of ${missing.length} supplied` : "all resolved automatically"],
     ["Voice", `${o.voice} at ${o.speed}&times; speed`],
+    ...(translationWanted() ? [["Language", `${LANGUAGES[o.translate_to].name} voice, subtitles
+      ${o.subs_lang === "original" ? "in the original language" : "translated"}, slides
+      ${o.slides_lang === "original" ? "in the original language" : "translated"}`]] : []),
     ["Kokoro", kokoroOK ? "running and answering"
                         : "not answering &mdash; SlideCast will try to start it"],
     ["Subtitles", `${o.font} ${o.font_size}px, outline ${o.outline}, ${o.margin_v}px off the bottom`],
@@ -656,8 +1094,9 @@ function preflight() {
     `<div><span class="k">${k}</span><span class="v">${v}</span></div>`).join("");
 
   const warns = [];
-  if (!report.has_markup)
-    warns.push("The script has no Kokoro markup. Pronunciation will be wrong.");
+  if (!report.has_markup && !deckFromAI)
+    warns.push("The script has no Kokoro markup and no word from Pronunciations. "
+             + "Some words may be mispronounced.");
   if (!kokoroOK)
     warns.push("Kokoro is not answering yet. The build will try to start it first, which can "
              + "take a minute or two if Docker Desktop has to launch.");
@@ -674,6 +1113,11 @@ function preflight() {
 }
 
 $("go").onclick = () => {
+  if (translationWanted() && !translationReady()) {
+    updateTranslationUI();
+    $("translateStatus").scrollIntoView({block: "center", behavior: "smooth"});
+    return;
+  }
   if (lastResult && lastResult.duration && !lastResult.saved) {
     const t = lastResult.duration;
     $("unsavedDetail").innerHTML =
@@ -705,9 +1149,11 @@ $("confirmGo").onclick = async () => {
   $("resultNote").innerHTML = "";
   $("dl").hidden = $("dlsub").hidden = true;
   $("capcutPanel").hidden = true;
+  $("publish").hidden = true;
   await fetch("/build", {method: "POST",
     body: JSON.stringify({deck: deckText, script: scriptText,
-                          assets: assetFiles, options: collectOptions()})});
+                          assets: assetFiles, options: collectOptions(),
+                          ...translationPayload()})});
   poll();
 };
 
@@ -722,6 +1168,13 @@ function showResult(r, fromEarlier) {
   $("player").innerHTML = `<video controls src="/video?t=${Date.now()}"></video>`;
   $("dl").hidden = $("dlsub").hidden = false;
   $("capcutPanel").hidden = false;
+  $("publish").hidden = !r.chapters;
+  if (r.chapters) {
+    $("chapterText").textContent = r.chapters.join("\n");
+    $("chapterNote").innerHTML = (r.chapter_problems || []).map(p =>
+      `<div class="status warn">${p} The list is still written; YouTube just will not show
+       chapters until it is fixed.</div>`).join("");
+  }
   $("resultNote").innerHTML = fromEarlier
     ? `<div class="status ok">A finished video is still here from an earlier build &mdash;
        ${describe(r)}. It stays until you build again, so you cannot lose it by refreshing.</div>`
@@ -893,7 +1346,7 @@ async function generateVoice(ui) {
   ui.note("warn", `Generating the voice with Kokoro. This takes a couple of minutes for a full
      script, but only once &mdash; the build afterwards reuses it.`);
   await fetch("/voice", {method: "POST", body: JSON.stringify(
-    {script: scriptText, options: collectOptions()})});
+    {script: scriptText, options: collectOptions(), ...translationPayload()})});
   const timer = setInterval(async () => {
     const s = await fetch("/status").then(r => r.json());
     const last = s.log[s.log.length - 1] || "";
@@ -932,7 +1385,7 @@ $("genVoice").onclick = async () => {
      this takes a couple of minutes for a full script &mdash; but only once. The build afterwards
      reuses it.`);
   await fetch("/voice", {method: "POST", body: JSON.stringify(
-    {script: scriptText, options: collectOptions()})});
+    {script: scriptText, options: collectOptions(), ...translationPayload()})});
   const timer = setInterval(async () => {
     const s = await fetch("/status").then(r => r.json());
     const last = s.log[s.log.length - 1] || "";
@@ -1006,6 +1459,11 @@ function saveVideo() {
 }
 
 $("dl").onclick = saveVideo;
+$("copyChapters").onclick = async () => {
+  await navigator.clipboard.writeText($("chapterText").textContent);
+  $("copyChapters").textContent = "Copied";
+  setTimeout(() => { $("copyChapters").textContent = "Copy chapters"; }, 1500);
+};
 $("dlsub").onclick = () => location.href = "/subs";
 
 /* Kokoro lives in Docker. Show whether it is up, and offer to start it, rather
@@ -1087,20 +1545,38 @@ function applyOptions(o) {
    "fps", "font", "font_size", "outline", "margin_v", "max_chars", "min_sub",
    "music_db", "highlight_colour", "chunk", "design_width"]
     .forEach(k => set(k, o[k]));
+  if (o.translate_to !== undefined && (o.translate_to === "" || LANGUAGES[o.translate_to]))
+    $("translateTo").value = o.translate_to;
+  if (o.subs_lang) $("subsLang").value = o.subs_lang;
+  if (o.slides_lang) $("slidesLang").value = o.slides_lang;
+  fillVoices();
   if (o.voice) $("voice").value = o.voice;
   if (o.bold !== undefined) $("bold").value = o.bold ? "1" : "0";
   if (o.preset && PRESETS[o.preset]) $("preset").value = o.preset;
   if (o.highlight !== undefined) $("highlight").value = o.highlight ? "1" : "0";
   if (o.highlight_colour) $("highlight_colour").value = o.highlight_colour;
   if (o.chunk) $("chunk").value = o.chunk;
+  if (o.format) setFormat(o.format, false);
+  if (o.ai_provider && AI_PROVIDERS[o.ai_provider]) {
+    $("aiProvider").value = o.ai_provider;
+    $("aiModel").value = o.ai_model || "";
+    $("aiBase").value = o.ai_base || "";
+    aiProviderChanged(true);
+  }
 }
 
 async function boot() {
   refreshKokoro();          // not awaited: it can resolve while the session loads
   await voicesReady;
+  await formatsReady;
+  await aiReady;
   const s = await fetch("/session").then(r => r.json()).catch(() => ({}));
   restoring = true;
   if (s && s.options) applyOptions(s.options);
+  if (s && s.aiTopic) $("aiTopic").value = s.aiTopic;
+  if (s && s.aiDeck) { aiDeck = s.aiDeck; renderAiReview(); }
+  deckFromAI = !!(s && s.deckFromAI);
+  translation = (s && s.translation) || null;
   if (s && s.deckText) {
     deckText = s.deckText; scriptText = s.scriptText || "";
     deckName = s.deckName || ""; scriptName = s.scriptName || "";
@@ -1110,6 +1586,7 @@ async function boot() {
     renderAssets();
   }
   restoring = false;
+  updateTranslationUI();
   updateFadeNote();
   updateHighlightNote();
   updateSubPreview();

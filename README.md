@@ -219,6 +219,14 @@ the voice, speed, the pauses, and whether Kokoro is sent whole slides or single
 sentences. Change any of those and it is regenerated; change a subtitle colour
 and it is not.
 
+**Regenerating only re-records what changed.** Every piece sent to Kokoro (a
+slide, or a sentence in sentence mode) is kept under
+`workspace/voice_cache/pieces/`, keyed on its text, the voice and the speed.
+Edit one slide and only that slide goes back to Kokoro; change a pause and
+nothing does, because the pauses are added around the pieces afterwards.
+Pieces the latest build did not use are deleted. The command line keeps its
+own in `<build>/voice_cache/`.
+
 Default is **-20 dB**. Loudness varies by track, so trust the preview's verdict
 rather than the number.
 
@@ -252,8 +260,167 @@ python slidecast.py <deck.html> <voiceover-kokoro.txt> -o out.mp4
 Useful flags: `--voice af_sky` `--speed 1.0` `--font-size 54` `--outline 4`
 `--margin-v 20` `--max-chars 56` `--min-sub 0.9` `--gap-slide 1.1` `--fade 0.45`
 `--no-fades` `--no-subs` `--music track.mp3` `--music-db -20` `--bold`
-`--chunk slide|sentence` `--highlight` `--align-words` `--whisper base`.
+`--chunk slide|sentence` `--highlight` `--align-words` `--whisper base`
+`--format video|short|square|portrait` `--pronunciations file.json`
+`--voice-script translation.txt`.
 `--assets` takes a JSON file mapping a relative `src` to an absolute path.
+Font size, line length and subtitle height default to what suits the format.
+
+Besides the MP4, every build writes `<name>-chapters.txt` and
+`<name>-thumbnail.jpg` next to it.
+
+## Building without the UI: the drop folder
+
+```bash
+python watch.py
+```
+
+Watches `inbox/`. Drop in a folder holding one deck (`.html`) and one script
+(`.txt`) and it is built into that same folder: `video.mp4`, `video.srt`,
+`video-chapters.txt` and `video-thumbnail.jpg`. It starts Kokoro itself.
+
+A folder is only picked up once nothing in it has changed for 5 seconds, so a
+copy still in progress is not built half-finished. A failure writes
+`error.txt`. Either way the folder is not built again: delete `video.mp4` or
+`error.txt` to rebuild it. `python watch.py --once` builds whatever is ready
+and exits, for running from a scheduler.
+
+An optional `settings.json` in the folder changes any setting, using the
+command line's names. Files it names are read relative to the folder:
+
+```json
+{"voice": "am_adam", "format": "short", "music": "bed.mp3", "music_db": -22}
+```
+
+## Write with AI, on your own key
+
+The first panel writes the deck for you. Give it a topic or paste your notes,
+pick the number of slides, and an AI writes every slide's heading, bullets and
+narration. A review screen shows all of it as editable fields; **Use this**
+turns it into a deck and a script and drops both into Inputs.
+
+It works with **Claude**, **OpenAI**, **Google Gemini**, or anything that speaks
+OpenAI's chat format at an address you give: OpenRouter, Groq, Mistral,
+DeepSeek, or a local Ollama or LM Studio, which needs no key and costs nothing.
+The model box is filled with a suggestion for the chosen service; type any
+other model name to use it.
+
+**You use your own API key, so the AI service bills you directly.** The key is
+kept in the page only. It is sent to the local SlideCast server with each AI
+request, used for that one call, and never written to `session.json`, the log
+or anywhere else. Reloading the page forgets it. **Test the key** makes a tiny
+call to check it works.
+
+The AI writes the content only; the design is SlideCast's own
+(`deck_template.py`). Every size in it is measured from the frame, so the same
+deck fills all four formats, and its bullets appear as they are spoken. If
+the AI answers in the wrong shape it is told what was wrong and asked once
+more; a second failure is reported rather than guessed at. All calls are plain
+HTTP from `ai.py`, so there is still nothing to `pip install`.
+
+## Pronunciations
+
+Kokoro reads `dbt` as a word and gets `AI` wrong unless the script carries its
+markup, `[dbt](/dˌibˌitˈi/)`. The **Pronunciations** list in the Voice panel
+saves you typing it: every whole-word match in the script gets its markup
+added on the way to Kokoro. Matching ignores case and keeps the spelling as
+written, which is what the subtitles show; words that already carry markup are
+left alone; a longer entry wins, so `VS Code` beats `VS`. **Hear it** speaks
+one word with its sound so you can check it by ear.
+
+The list lives in `pronunciations.json`, seeded with the words the comparison
+videos marked by hand, and applies to English voices only. With it a plain
+script works, so the no-markup warning now only appears when the script has
+no markup *and* no listed word.
+
+## Formats: video, Short, square or portrait
+
+**Build &rarr; Format** picks the shape:
+
+| Format | Size | For |
+|---|---|---|
+| Video | 1920x1080 | YouTube, websites, presentations |
+| Short | 1080x1920 | YouTube Shorts, TikTok, Instagram Reels |
+| Square | 1080x1080 | Instagram and LinkedIn feed posts |
+| Portrait | 1080x1350 | Instagram and Facebook feed posts |
+
+The slides are **rendered** at that shape, not letterboxed, so every format
+fills its frame and is ready to post. Video renders exactly as before, Deck
+design width included; the others lay the deck out against a 540px-wide CSS
+viewport and capture it at 2x. Picking a format resets font size, line length
+and subtitle height to suit it. A Short's subtitles sit 380px up, clear of the
+app's own buttons and caption. The CapCut draft gets the matching canvas.
+
+A deck someone laid out by hand for a wide screen only fills a Short properly
+if its own CSS adapts, and the UI says so. Decks from Write with AI fit all
+four.
+
+## Bullets that appear as they are spoken
+
+Give an element in the deck `data-step="1"`, `data-step="2"` and so on, and put
+`[show]` at the start of the sentence where each should appear:
+
+```
+Here are three things worth knowing. [show] The first is speed. [show] The second is cost.
+```
+
+`[show]` is removed before Kokoro and before the subtitles. The slide is
+rendered once per step, with later steps hidden by `visibility` so nothing
+else on the slide moves, and each picture takes over as its sentence starts.
+The black fade still belongs to the slide, so it only happens between slides.
+A deck with no `data-step` builds exactly as before. Timing is exact in
+sentence mode and with word alignment, and shared by character count
+otherwise.
+
+## Chapters and thumbnail
+
+Every build writes YouTube chapters (`0:00 Hook`, `0:42 What each one needs`)
+from the slide labels and the real time each slide appears, and a thumbnail
+from the first slide with all its steps showing: 1280x720 for Video, full size
+for the other formats, JPEG because YouTube refuses one over 2 MB. The Build
+panel has **Copy chapters**, **Download chapters** and **Download thumbnail**.
+
+YouTube ignores the chapter list unless there are at least 3 chapters, the
+first at 0:00, each at least 10 seconds long. When a video breaks one of those
+the panel says which slides.
+
+## Other languages
+
+**Voice &rarr; Translate the narration into** picks a language, and two more
+choices say what follows it:
+
+- **Subtitles:** in the new language, or kept in the original.
+- **Slides:** translated, or kept as they are.
+
+**Translate** uses the AI service and key from Write with AI. The script is
+translated sentence by sentence and must come back with the same number of
+sentences per slide, each still one sentence; a translation that does not is
+sent back once, then refused. That is what lets English subtitles line up
+under, say, a Spanish voice. `[show]` markers go back on their sentences.
+
+An AI deck has its slide text translated and is drawn again. A hand-made deck
+has every piece of visible text swapped for its translation, with tags,
+styles and scripts left untouched.
+
+**Subtitles in the original language** record the voice one sentence at a time,
+so each subtitle's window is exact, and turn word highlighting off: an English
+word cannot be highlighted in Spanish audio. With subtitles in the voice's
+language, highlighting works: alignment listens in that language.
+
+Languages: English (American and British), Spanish, French, Italian,
+Portuguese (Brazil) and Hindi, the ones Kokoro speaks that put spaces between
+words, which the subtitle line-breaking depends on. Picking one offers only
+its voices. The command line takes `--voice-script` for a translation you
+already have.
+
+## Tests
+
+```bash
+python -m unittest
+```
+
+Built-in `unittest`, nothing to install. Kokoro, Chrome and every AI service
+are replaced by fakes, so the tests run offline in under a second.
 
 ## Deck design width
 
@@ -404,3 +571,7 @@ The course lessons under `Rosetta-DBT-Studio-Beginners-Course/` are screen
 recordings of the live app, not slideshows. This tool cannot generate that
 footage. It applies to decks where every frame is a rendered slide, which is the
 comparison videos.
+
+Japanese and Chinese are not offered: Kokoro speaks them, but they put no
+spaces between words and the subtitle line-breaking needs spaces. Albanian is
+not offered because Kokoro has no Albanian voice.

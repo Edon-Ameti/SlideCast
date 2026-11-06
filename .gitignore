@@ -7,3 +7,6 @@ config.json
 
 __pycache__/
 *.pyc
+
+# Folders dropped in for watch.py to build.
+inbox/

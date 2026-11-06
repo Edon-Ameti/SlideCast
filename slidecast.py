@@ -8,6 +8,7 @@ itself, so it carries real capitalisation and punctuation.
 
 import argparse
 import array
+import hashlib
 import io
 import json
 import math
@@ -20,6 +21,28 @@ from urllib import request as urlrequest
 
 KOKORO_URL = "http://localhost:7860/tts/convert"
 SAMPLE_RATE = 24000
+
+# The shapes a video can be made in. Slides are rendered at the shape itself,
+# so each fills its frame with no bars. The subtitle defaults suit the frame:
+# a Short is narrow, and its bottom is covered by the app's own buttons and
+# caption, so its subtitles sit higher.
+FORMATS = {
+    "video":    {"size": (1920, 1080), "font_size": 54, "max_chars": 56, "margin_v": 20,
+                 "label": "Regular video: YouTube, websites, presentations"},
+    "short":    {"size": (1080, 1920), "font_size": 62, "max_chars": 26, "margin_v": 380,
+                 "label": "Vertical: YouTube Shorts, TikTok, Instagram Reels"},
+    "square":   {"size": (1080, 1080), "font_size": 50, "max_chars": 34, "margin_v": 40,
+                 "label": "Square: Instagram and LinkedIn feed posts"},
+    "portrait": {"size": (1080, 1350), "font_size": 52, "max_chars": 32, "margin_v": 60,
+                 "label": "Tall feed post: Instagram, Facebook"},
+}
+# Non-video formats are laid out against a CSS width of 540 and rendered at 2x.
+# A wide deck keeps its own design width setting.
+NARROW_DESIGN_WIDTH = 540
+
+
+def frame_size(opts):
+    return FORMATS[getattr(opts, "format", "video") or "video"]["size"]
 CHROME_CANDIDATES = [
     r"C:\Program Files\Google\Chrome\Application\chrome.exe",
     r"C:\Program Files (x86)\Google\Chrome\Application\chrome.exe",
@@ -43,12 +66,73 @@ CHROME_ON_PATH = ["chrome", "google-chrome", "google-chrome-stable",
 
 MARKUP = re.compile(r"\[([^\]]+)\]\((?:/[^)]*/|[+-]\d)\)")
 SLIDE_HDR = re.compile(r"^Slide\s+(\d+)\s*(?:-\s*(.*))?$", re.I)
-SENT_SPLIT = re.compile(r"(?<=[.!?\u2026])\s+")
+# \u0964 is the danda, the full stop of Hindi.
+SENT_SPLIT = re.compile(r"(?<=[.!?\u2026\u0964])\s+")
+
+# The languages Kokoro speaks that put spaces between words, which the
+# subtitle line-breaking depends on. A voice's first letter is its language.
+LANGUAGES = {
+    "a": {"name": "English (American)", "whisper": "en"},
+    "b": {"name": "English (British)", "whisper": "en"},
+    "e": {"name": "Spanish", "whisper": "es"},
+    "f": {"name": "French", "whisper": "fr"},
+    "i": {"name": "Italian", "whisper": "it"},
+    "p": {"name": "Portuguese (Brazil)", "whisper": "pt"},
+    "h": {"name": "Hindi", "whisper": "hi"},
+}
+
+
+def language_of(voice):
+    return LANGUAGES.get(voice[:1], LANGUAGES["a"])
 
 
 def strip_markup(text):
     """Turn Kokoro markup back into plain words. Markup changes sound, never wording."""
     return MARKUP.sub(r"\1", text)
+
+
+PRONUNCIATIONS = Path(__file__).parent / "pronunciations.json"
+
+
+def load_pronunciations(path=PRONUNCIATIONS):
+    """{word: sound}. A missing file is an empty dictionary, not an error."""
+    if not path or not Path(path).exists():
+        return {}
+    return json.loads(Path(path).read_text(encoding="utf-8"))
+
+
+def is_english_voice(voice):
+    """Kokoro's English voices are af_/am_ (American) and bf_/bm_ (British)."""
+    return voice[:1] in ("a", "b")
+
+
+def apply_pronunciations(text, dictionary):
+    """Add Kokoro markup to every whole-word match, so a plain script is enough.
+
+    Matching ignores case but keeps the spelling as written, which is what the
+    subtitles show. Words that already carry markup are left alone. Longer
+    entries win, so "VS Code" is matched before "VS".
+    """
+    if not dictionary:
+        return text
+    sounds = {word.lower(): sound if sound.startswith("/") else f"/{sound.strip('/')}/"
+              for word, sound in dictionary.items() if word.strip() and sound.strip()}
+    if not sounds:
+        return text
+    words = sorted(sounds, key=len, reverse=True)
+    pattern = re.compile(r"(?<![\w\[])(" + "|".join(map(re.escape, words)) + r")(?![\w\]])",
+                         re.I)
+
+    def mark(match):
+        return f"[{match.group(1)}]({sounds[match.group(1).lower()]})"
+
+    pieces, last = [], 0
+    for existing in MARKUP.finditer(text):
+        pieces.append(pattern.sub(mark, text[last:existing.start()]))
+        pieces.append(existing.group(0))
+        last = existing.end()
+    pieces.append(pattern.sub(mark, text[last:]))
+    return "".join(pieces)
 
 
 def parse_script(path):
@@ -67,12 +151,33 @@ def parse_script(path):
         elif current is not None:
             current["parts"].append(line)
     for slide in slides:
-        slide["paragraph"] = " ".join(slide.pop("parts"))
+        slide["paragraph"], slide["steps"] = take_steps(" ".join(slide.pop("parts")))
     return [s for s in slides if s["paragraph"]]
 
 
 def split_sentences(paragraph):
     return [s.strip() for s in SENT_SPLIT.split(paragraph) if s.strip()]
+
+
+SHOW = re.compile(r"\[show\]\s*", re.I)
+
+
+def take_steps(paragraph):
+    """Remove the [show] markers. Returns the clean paragraph, and for each
+    marker the index of the sentence it starts, so the deck's next data-step
+    element appears as that sentence begins. Never spoken, never shown."""
+    kept, steps, pending = [], [], 0
+    for sentence in split_sentences(paragraph):
+        count = len(SHOW.findall(sentence))
+        clean = SHOW.sub("", sentence).strip()
+        if not clean:                       # a marker on its own, before the next sentence
+            pending += count
+            continue
+        steps += [len(kept)] * (pending + count)
+        pending = 0
+        kept.append(clean)
+    steps += [max(len(kept) - 1, 0)] * pending
+    return " ".join(kept), steps
 
 
 # Ending a subtitle line on one of these leaves it dangling into the next line.
@@ -227,15 +332,47 @@ def silence(seconds):
     return b"\x00\x00" * int(SAMPLE_RATE * seconds)
 
 
-def build_audio(slides, opts, log):
+def voice_piece_key(text, voice, speed):
+    """Only what changes the sound of one piece. Pauses are added around the
+    pieces afterwards, so changing a gap never re-records anything."""
+    parts = [text, voice, f"{float(speed):.6f}"]
+    return hashlib.sha1(json.dumps(parts).encode("utf-8")).hexdigest()
+
+
+def speak_piece(text, opts, cache_dir, used_keys):
+    """Kokoro's audio for one piece, trimmed, from the cache when it is there."""
+    key = voice_piece_key(text, opts.voice, opts.speed)
+    used_keys.add(key)
+    cached = cache_dir / f"{key}.wav" if cache_dir else None
+    if cached and cached.exists():
+        with wave.open(str(cached), "rb") as w:
+            return w.readframes(w.getnframes()), True
+    frames, rate = decode_wav(synthesize(text, opts.voice, opts.speed, opts.kokoro))
+    if rate != SAMPLE_RATE:
+        raise RuntimeError(f"Kokoro returned {rate} Hz, expected {SAMPLE_RATE}")
+    frames = trim_silence(frames, rate)
+    if cached:
+        cache_dir.mkdir(parents=True, exist_ok=True)
+        write_wav(cached, frames)
+    return frames, False
+
+
+def build_audio(slides, opts, log, cache_dir=None):
     """Speak the script. Returns frames, cues, slide end times, total.
 
     A whole slide per call lets Kokoro carry phrasing across sentences, which is
     how it sounds when you paste a paragraph into its own UI. Sentence by
     sentence gives exact sentence boundaries with no alignment, at the cost of
     every sentence starting cold.
+
+    With a cache_dir every piece is kept, so editing one slide re-records that
+    slide only. Pieces this build did not use are deleted afterwards.
     """
     per_slide = getattr(opts, "chunk", "slide") == "slide"
+    cache_dir = Path(cache_dir) if cache_dir else None
+    used_keys = set()
+    dictionary = (load_pronunciations(getattr(opts, "pronunciations", None))
+                  if is_english_voice(opts.voice) else {})
     track = bytearray()
     cues, slide_ends = [], []
     track += silence(opts.lead_in)
@@ -244,13 +381,11 @@ def build_audio(slides, opts, log):
                  else split_sentences(slide["paragraph"]))
         for position, unit in enumerate(units):
             where = f"  slide {index + 1}/{len(slides)}"
-            log(where if per_slide
-                else f"{where}, sentence {position + 1}/{len(units)}")
-            frames, rate = decode_wav(
-                synthesize(unit, opts.voice, opts.speed, opts.kokoro))
-            if rate != SAMPLE_RATE:
-                raise RuntimeError(f"Kokoro returned {rate} Hz, expected {SAMPLE_RATE}")
-            frames = trim_silence(frames, rate)
+            if not per_slide:
+                where += f", sentence {position + 1}/{len(units)}"
+            frames, from_cache = speak_piece(apply_pronunciations(unit, dictionary),
+                                             opts, cache_dir, used_keys)
+            log(where + (" (unchanged, reused)" if from_cache else ""))
             start = len(track) / 2 / SAMPLE_RATE
             track += frames
             end = len(track) / 2 / SAMPLE_RATE
@@ -261,6 +396,10 @@ def build_audio(slides, opts, log):
         if index < len(slides) - 1:
             track += silence(opts.gap_slide)
     track += silence(opts.tail)
+    if cache_dir and cache_dir.exists():
+        for old in cache_dir.glob("*.wav"):
+            if old.stem not in used_keys:
+                old.unlink()
     return bytes(track), cues, slide_ends, len(track) / 2 / SAMPLE_RATE
 
 
@@ -354,8 +493,21 @@ def count_slides(html):
     return len(re.findall(r'<section[^>]*class="[^"]*\bslide\b', html))
 
 
-def render_slides(html_path, assets, outdir, chrome, log, design_width=1536):
-    """One 1920x1080 PNG per slide. Returns the list of paths."""
+def step_css(state, steps):
+    """Hide the data-step elements that have not appeared yet. visibility keeps
+    their space, so nothing else on the slide moves when one appears."""
+    hidden = [f'[data-step="{k}"]' for k in range(state + 1, steps + 1)]
+    return f"<style>{','.join(hidden)}{{visibility:hidden!important}}</style>" if hidden else ""
+
+
+def render_slides(html_path, assets, outdir, chrome, log, design_width=1536,
+                  size=(1920, 1080), steps_per_slide=None):
+    """PNGs at the frame size: one list per slide, holding one picture per step
+    (just one picture for a slide with no steps)."""
+    width, height = size
+    if width <= height:
+        design_width = NARROW_DESIGN_WIDTH
+    viewport = (design_width, round(design_width * height / width))
     source = Path(html_path)
     html = absolutize(source.read_text(encoding="utf-8"), source.parent, assets)
     total = count_slides(html)
@@ -374,32 +526,47 @@ def render_slides(html_path, assets, outdir, chrome, log, design_width=1536):
     # Without its own profile dir, a headless launch is swallowed by an
     # already-running Chrome: it exits 0 and writes no PNG.
     profile = (outdir / "_chrome").resolve()
+    for stale in outdir.glob("*.png"):
+        stale.unlink()
+    steps_per_slide = steps_per_slide or [0] * total
     paths = []
     for index in range(total):
-        page = work / f"slide-{index + 1}.html"
-        page.write_text(
-            html.replace("let currentSlide = 0;", f"let currentSlide = {index};", 1),
-            encoding="utf-8")
-        # Chrome refuses a relative --screenshot path ("Access is denied") but
-        # still exits 0, so the path must be absolute and the result checked.
-        png = (outdir / f"{index + 1}.png").resolve()
-        log(f"  rendering slide {index + 1}/{total}")
-        # The '#1' is required: the deck hides its counter only when the hash is non-empty.
-        # The deck is laid out against a CSS viewport, and how big its text
-        # looks depends on that width, not on the output size. A 1920 screen at
-        # 125% Windows scaling gives the browser a 1536 viewport, so a deck
-        # designed by eye there renders smaller if captured at 1920. Render at
-        # the width it was designed for and scale up to 1080p.
-        subprocess.run([chrome, "--headless=new", "--disable-gpu", "--hide-scrollbars",
-                        f"--force-device-scale-factor={1920 / design_width:.6f}",
-                        f"--window-size={design_width},{round(design_width * 9 / 16)}",
-                        f"--user-data-dir={profile}",
-                        f"--screenshot={png}", page.resolve().as_uri() + "#1"],
-                       check=True, capture_output=True)
-        if not png.exists():
-            raise RuntimeError(f"Chrome wrote no PNG for slide {index + 1}")
-        paths.append(png)
+        steps = steps_per_slide[index] if index < len(steps_per_slide) else 0
+        paths.append([])
+        for state in range(steps + 1):
+            log(f"  rendering slide {index + 1}/{total}"
+                + (f", step {state}/{steps}" if steps else ""))
+            paths[-1].append(render_one(html, index, state, steps, work, outdir, chrome,
+                                        profile, design_width, width, viewport))
     return paths
+
+
+def render_one(html, index, state, steps, work, outdir, chrome, profile,
+               design_width, width, viewport):
+    name = f"{index + 1}" + (f"-{state}" if steps else "")
+    page = work / f"slide-{name}.html"
+    page.write_text(
+        html.replace("let currentSlide = 0;", f"let currentSlide = {index};", 1)
+            .replace("</head>", step_css(state, steps) + "</head>", 1),
+        encoding="utf-8")
+    # Chrome refuses a relative --screenshot path ("Access is denied") but
+    # still exits 0, so the path must be absolute and the result checked.
+    png = (outdir / f"{name}.png").resolve()
+    # The '#1' is required: the deck hides its counter only when the hash is non-empty.
+    # The deck is laid out against a CSS viewport, and how big its text
+    # looks depends on that width, not on the output size. A 1920 screen at
+    # 125% Windows scaling gives the browser a 1536 viewport, so a deck
+    # designed by eye there renders smaller if captured at 1920. Render at
+    # the width it was designed for and scale up to the frame.
+    subprocess.run([chrome, "--headless=new", "--disable-gpu", "--hide-scrollbars",
+                    f"--force-device-scale-factor={width / design_width:.6f}",
+                    f"--window-size={viewport[0]},{viewport[1]}",
+                    f"--user-data-dir={profile}",
+                    f"--screenshot={png}", page.resolve().as_uri() + "#1"],
+                   check=True, capture_output=True)
+    if not png.exists():
+        raise RuntimeError(f"Chrome wrote no PNG for slide {index + 1}")
+    return png
 
 
 # --------------------------------------------------------------------------
@@ -561,13 +728,14 @@ def dialogue_lines(events, opts):
 
 
 def write_ass(path, events, opts):
-    """PlayRes is the real frame size, so Fontsize is genuine pixels at 1080p."""
+    """PlayRes is the real frame size, so Fontsize is genuine pixels."""
     bold = -1 if opts.bold else 0
+    width, height = frame_size(opts)
     header = (
         "[Script Info]\n"
         "ScriptType: v4.00+\n"
-        "PlayResX: 1920\n"
-        "PlayResY: 1080\n"
+        f"PlayResX: {width}\n"
+        f"PlayResY: {height}\n"
         "WrapStyle: 2\n"
         "ScaledBorderAndShadow: yes\n"
         "\n"
@@ -581,7 +749,7 @@ def write_ass(path, events, opts):
         f"&H000000FF,"
         f"{ass_style_colour(getattr(opts, 'outline_colour', '#000000'))},"
         f"&H00000000,{bold},0,0,0,100,100,0,0,1,{opts.outline},0,2,"
-        f"80,80,{opts.margin_v},1\n"
+        f"{60 if width < 1920 else 80},{60 if width < 1920 else 80},{opts.margin_v},1\n"
         "\n"
         "[Events]\n"
         # MarginV belongs in this list. Leaving it out shifts every field and
@@ -606,22 +774,76 @@ def slide_durations(slide_ends, total, gap_slide):
     return durations
 
 
-def build_filtergraph(durations, opts):
-    """One faded segment per slide, then concat.
+def with_subtitle_text(cues, slides):
+    """Swap each spoken sentence's text for the matching sentence of another
+    script, so a translated voice can carry subtitles in the original language.
+    The translation keeps one sentence for one sentence, and the voice is
+    recorded a sentence at a time, so each window is exact."""
+    texts = [sentence for slide in slides for sentence in split_sentences(slide["paragraph"])]
+    if len(texts) != len(cues):
+        raise RuntimeError(
+            f"the subtitle script has {len(texts)} sentences but the voice has {len(cues)}; "
+            "translate the script again")
+    return [(start, end, strip_markup(text)) for (start, end, _), text in zip(cues, texts)]
+
+
+def sentence_starts_per_slide(cues, ranges):
+    """When each sentence starts, grouped by the slide it is spoken on."""
+    starts = [[] for _ in ranges]
+    for start, _, _ in cues:
+        slide = max((i for i, (a, _) in enumerate(ranges) if a <= start + 1e-6), default=0)
+        starts[slide].append(start)
+    return starts
+
+
+def picture_segments(pngs, durations, slides, sentence_starts):
+    """(png, seconds, fade_in, fade_out) for every picture on the timeline.
+
+    A slide with steps is several pictures: the next one replaces the last as
+    its sentence starts. The black fade belongs to the slide, so it goes in at
+    its first picture and out at its last.
+    """
+    segments, slide_start = [], 0.0
+    for index, (images, duration) in enumerate(zip(pngs, durations)):
+        slide_end = slide_start + duration
+        starts = sentence_starts[index] if index < len(sentence_starts) else []
+        times = sorted(
+            min(max(starts[min(at, len(starts) - 1)] if starts else slide_start,
+                    slide_start), slide_end)
+            for at in slides[index].get("steps", [])[:len(images) - 1])
+        bounds = [slide_start] + times + [slide_end]
+        pieces = [(image, bounds[k + 1] - bounds[k]) for k, image in enumerate(images)]
+        # A step on the first word leaves its "before" picture zero seconds long.
+        pieces = [p for p in pieces if p[1] > 0.01] or pieces[-1:]
+        for k, (image, length) in enumerate(pieces):
+            segments.append((image, length, k == 0, k == len(pieces) - 1))
+        slide_start = slide_end
+    return segments
+
+
+def build_filtergraph(segments, opts):
+    """One segment per picture, fades where a slide starts and ends, then concat.
 
     Fades must be local to each segment. Chaining fades on a single timeline
     does not work: fade=t=in:st=X blacks out everything before X, and
     fade=t=out leaves everything after it black.
     """
     fade = opts.fade
+    width, height = frame_size(opts)
     chains = []
-    for index, duration in enumerate(durations):
-        out = max(duration - fade, 0.0)
-        fades = ("" if opts.no_fades else
-                 f",fade=t=in:st=0:d={fade},fade=t=out:st={out:.3f}:d={fade}")
-        chains.append(f"[{index}:v]fps={opts.fps},setsar=1{fades}[v{index}]")
-    labels = "".join(f"[v{i}]" for i in range(len(durations)))
-    chains.append(f"{labels}concat=n={len(durations)}:v=1:a=0[vc]")
+    for index, (_, duration, fade_in, fade_out) in enumerate(segments):
+        fades = ""
+        if not opts.no_fades:
+            if fade_in:
+                fades += f",fade=t=in:st=0:d={fade}"
+            if fade_out:
+                fades += f",fade=t=out:st={max(duration - fade, 0.0):.3f}:d={fade}"
+        # The scale only guards against Chrome rounding the PNG a pixel off,
+        # which concat would refuse.
+        chains.append(f"[{index}:v]scale={width}:{height},fps={opts.fps},setsar=1"
+                      f"{fades}[v{index}]")
+    labels = "".join(f"[v{i}]" for i in range(len(segments)))
+    chains.append(f"{labels}concat=n={len(segments)}:v=1:a=0[vc]")
     last = "vc"
     if not opts.no_subs:
         # ffmpeg runs from the build dir, so no Windows path escaping is needed.
@@ -635,14 +857,14 @@ def gain(db):
     return 10 ** (float(db) / 20.0)
 
 
-def assemble(build, slides_png, durations, total, opts, log):
+def assemble(build, segments, total, opts, log):
     command = [opts.ffmpeg, "-y"]
-    for png, duration in zip(slides_png, durations):
-        command += ["-loop", "1", "-t", f"{duration:.3f}", "-i", str(png.resolve())]
+    for png, duration, _, _ in segments:
+        command += ["-loop", "1", "-t", f"{duration:.3f}", "-i", str(Path(png).resolve())]
     command += ["-i", "audio.wav"]
-    voice = len(durations)
+    voice = len(segments)
 
-    graph, last = build_filtergraph(durations, opts)
+    graph, last = build_filtergraph(segments, opts)
     audio_map = f"{voice}:a"
     if getattr(opts, "music", None):
         # Looped so a short track still covers the video; amix ends with the
@@ -666,6 +888,48 @@ def assemble(build, slides_png, durations, total, opts, log):
 
 
 # --------------------------------------------------------------------------
+# chapters and thumbnail
+# --------------------------------------------------------------------------
+
+def chapter_time(seconds):
+    """YouTube's own format: 0:00, 1:05, 1:02:03."""
+    seconds = int(seconds)
+    h, rest = divmod(seconds, 3600)
+    m, s = divmod(rest, 60)
+    return f"{h}:{m:02d}:{s:02d}" if h else f"{m}:{s:02d}"
+
+
+def chapter_lines(slides, durations):
+    """One line per slide, starting where the slide appears on screen."""
+    lines, start = [], 0.0
+    for slide, duration in zip(slides, durations):
+        lines.append(f"{chapter_time(start)} {slide['label'] or 'Slide ' + str(slide['n'])}")
+        start += duration
+    return lines
+
+
+def chapter_problems(durations):
+    """YouTube ignores the chapter list unless all of these hold."""
+    problems = []
+    if len(durations) < 3:
+        problems.append("YouTube needs at least 3 chapters; this video has "
+                        f"{len(durations)} slides.")
+    short = [i + 1 for i, d in enumerate(durations) if d < 10]
+    if short:
+        problems.append("YouTube needs every chapter to last at least 10 seconds; "
+                        f"slide {', '.join(map(str, short))} "
+                        f"{'is' if len(short) == 1 else 'are'} shorter.")
+    return problems
+
+
+def write_thumbnail(png, path, size, ffmpeg="ffmpeg"):
+    """The first slide with everything shown. A wide video gets YouTube's
+    recommended 1280x720; other shapes keep their full size. JPEG, because
+    YouTube refuses a thumbnail over 2 MB."""
+    scale = ["-vf", "scale=1280:720"] if size == (1920, 1080) else []
+    subprocess.run([ffmpeg, "-v", "error", "-y", "-i", str(png), *scale, "-q:v", "2",
+                    str(path)], check=True)
+
 
 def run(opts, log=print, audio=None):
     """audio is an already-built (frames, cues, slide_ends, total), so a music
@@ -676,6 +940,13 @@ def run(opts, log=print, audio=None):
 
     slides = parse_script(opts.script)
     log(f"script: {len(slides)} slides")
+    # A translated voice with subtitles in the original language: the voice
+    # speaks one script, the subtitles and chapters come from the other.
+    voice_slides = (parse_script(opts.voice_script)
+                    if getattr(opts, "voice_script", None) else slides)
+    if len(voice_slides) != len(slides):
+        raise RuntimeError(f"the voice script has {len(voice_slides)} slides but the "
+                           f"subtitle script has {len(slides)}")
 
     # Check before rendering. Otherwise the failure lands minutes later, after
     # every slide is done, as a bare socket error.
@@ -688,22 +959,25 @@ def run(opts, log=print, audio=None):
     log("rendering slides")
     pngs = render_slides(opts.deck, assets, build / "slides",
                          opts.chrome or find_chrome(), log,
-                         getattr(opts, "design_width", 1536))
+                         getattr(opts, "design_width", 1536), frame_size(opts),
+                         [len(s["steps"]) for s in slides])
     if len(pngs) != len(slides):
         raise RuntimeError(
             f"deck has {len(pngs)} slides but the script has {len(slides)}")
 
     if audio is None:
         log("generating speech")
-        audio = build_audio(slides, opts, log)
+        audio = build_audio(voice_slides, opts, log, build / "voice_cache")
     else:
         log("reusing the voice already generated")
     frames, cues, slide_ends, total = audio
     write_wav(build / "audio.wav", frames)
     log(f"audio: {total:.1f}s")
+    if voice_slides is not slides:
+        cues = with_subtitle_text(cues, slides)
 
     word_times = None
-    if getattr(opts, "align_words", False):
+    if getattr(opts, "align_words", False) and voice_slides is slides:
         import align
         units = [text for _, _, text in cues]
         key = align.cache_key(units, total)
@@ -711,7 +985,8 @@ def run(opts, log=print, audio=None):
         if word_times is None:
             log("aligning words to the audio")
             word_times = align.word_times(
-                build / "audio.wav", units, getattr(opts, "whisper", "base"), log)
+                build / "audio.wav", units, getattr(opts, "whisper", "base"), log,
+                language_of(opts.voice)["whisper"])
             if word_times:
                 align.save(build, word_times, key)
         else:
@@ -729,11 +1004,29 @@ def run(opts, log=print, audio=None):
     clips = write_slide_audio(frames, ranges, build / "voice")
 
     durations = slide_durations(slide_ends, total, opts.gap_slide)
-    assemble(build, pngs, durations, total, opts, log)
+    segments = picture_segments(pngs, durations, slides,
+                                sentence_starts_per_slide(cues, ranges))
+    assemble(build, segments, total, opts, log)
+
+    out = Path(opts.out).resolve()
+    chapters = chapter_lines(slides, durations)
+    chapters_file = out.with_name(out.stem + "-chapters.txt")
+    chapters_file.write_text("\n".join(chapters) + "\n", encoding="utf-8")
+    thumbnail = out.with_name(out.stem + "-thumbnail.jpg")
+    write_thumbnail(pngs[0][-1], thumbnail, frame_size(opts), opts.ffmpeg)
+    log("chapters and thumbnail written next to the video")
     log(f"done: {opts.out}")
+    # pngs and slide_durations are per picture, so the CapCut draft gets every
+    # step too; fade_after says which pictures end a slide.
     return {"duration": total, "slides": len(pngs), "subtitles": len(events),
-            "slide_durations": durations, "out": str(Path(opts.out).resolve()),
-            "pngs": [str(p) for p in pngs],
+            "format": getattr(opts, "format", "video") or "video",
+            "size": list(frame_size(opts)), "margin_v": opts.margin_v,
+            "slide_durations": [s[1] for s in segments],
+            "fade_after": [s[3] for s in segments],
+            "chapters": chapters, "chapter_problems": chapter_problems(durations),
+            "chapters_file": str(chapters_file), "thumbnail": str(thumbnail),
+            "out": str(Path(opts.out).resolve()),
+            "pngs": [str(s[0]) for s in segments],
             "voice_clips": clips,
             "events": [[e[0], e[1], e[2]] for e in events]}
 
@@ -747,7 +1040,13 @@ def build_parser():
     p.add_argument("--assets", help="JSON map of {relative src: absolute path}")
     p.add_argument("--voice", default="af_sky")
     p.add_argument("--speed", type=float, default=1.0)
+    p.add_argument("--voice-script", dest="voice_script",
+                   help="a translation of the script for the voice to speak, one sentence "
+                        "for each sentence; the subtitles stay in the main script's language")
     p.add_argument("--kokoro", default=KOKORO_URL)
+    p.add_argument("--pronunciations", default=str(PRONUNCIATIONS),
+                   help="JSON of {word: sound}; matching words get Kokoro markup "
+                        "automatically (English voices only)")
     p.add_argument("--lead-in", type=float, default=0.6, dest="lead_in")
     p.add_argument("--tail", type=float, default=1.2)
     p.add_argument("--gap-sentence", type=float, default=0.28, dest="gap_sentence")
@@ -755,10 +1054,14 @@ def build_parser():
     p.add_argument("--fade", type=float, default=0.45)
     p.add_argument("--fps", type=int, default=30)
     p.add_argument("--font", default="Arial")
-    p.add_argument("--font-size", type=int, default=54, dest="font_size")
+    p.add_argument("--format", choices=tuple(FORMATS), default="video",
+                   help="; ".join(f"{name}: {f['size'][0]}x{f['size'][1]}, {f['label']}"
+                                  for name, f in FORMATS.items()))
+    # These three default to whatever suits the chosen format.
+    p.add_argument("--font-size", type=int, dest="font_size")
     p.add_argument("--outline", type=int, default=4)
-    p.add_argument("--margin-v", type=int, default=20, dest="margin_v")
-    p.add_argument("--max-chars", type=int, default=56, dest="max_chars")
+    p.add_argument("--margin-v", type=int, dest="margin_v")
+    p.add_argument("--max-chars", type=int, dest="max_chars")
     p.add_argument("--min-sub", type=float, default=0.9, dest="min_sub",
                    help="shortest time a subtitle line may stay on screen")
     p.add_argument("--bold", action="store_true", help="CapCut subtitles are not bold, so this is off by default")
@@ -787,14 +1090,31 @@ def build_parser():
     return p
 
 
-def main():
-    parser = build_parser()
-    opts = parser.parse_args()
+def finish_options(opts):
+    """Fill in what depends on other settings, and refuse a fade that would
+    cover speech. Shared by the command line and the drop folder."""
+    for key in ("font_size", "max_chars", "margin_v"):
+        if getattr(opts, key) is None:
+            setattr(opts, key, FORMATS[opts.format][key])
     if opts.highlight:
         opts.align_words = True
+    if getattr(opts, "voice_script", None):
+        # Subtitles in another language than the voice: each sentence is
+        # recorded on its own for exact timing, and no word can be highlighted.
+        opts.chunk = "sentence"
+        opts.align_words = opts.highlight = False
     if opts.gap_slide < 2 * opts.fade:
-        parser.error(f"--gap-slide must be at least twice --fade "
-                     f"({2 * opts.fade}) or the fade would cover speech")
+        raise ValueError(f"--gap-slide must be at least twice --fade "
+                         f"({2 * opts.fade}) or the fade would cover speech")
+    return opts
+
+
+def main():
+    parser = build_parser()
+    try:
+        opts = finish_options(parser.parse_args())
+    except ValueError as exc:
+        parser.error(str(exc))
     run(opts)
 
 
