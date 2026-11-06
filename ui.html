@@ -599,6 +599,7 @@ async function inspect() {
   } else {
     const total = (r.sentences || []).reduce((a, b) => a + b, 0);
     notes.push(["ok", `<b>${r.slides}</b> slides matched, <b>${total}</b> sentences to speak.` +
+      (r.steps ? ` <b>${r.steps}</b> item(s) appear as they are spoken.` : "") +
       (missing.length ? ` ${missing.length} screenshot(s) still needed.` : "")]);
     ready = true;
   }

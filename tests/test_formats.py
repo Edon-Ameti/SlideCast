@@ -22,7 +22,8 @@ class FormatTest(unittest.TestCase):
         self.assertEqual(d.frame_size(Namespace()), (1920, 1080))
 
     def test_filtergraph_scales_to_the_frame(self):
-        graph, _ = d.build_filtergraph([2.0, 3.0], opts("short"))
+        graph, _ = d.build_filtergraph([("a.png", 2.0, True, True),
+                                        ("b.png", 3.0, True, True)], opts("short"))
         self.assertIn("scale=1080:1920", graph)
         self.assertNotIn("1920:1080", graph)
 

@@ -134,12 +134,33 @@ def parse_script(path):
         elif current is not None:
             current["parts"].append(line)
     for slide in slides:
-        slide["paragraph"] = " ".join(slide.pop("parts"))
+        slide["paragraph"], slide["steps"] = take_steps(" ".join(slide.pop("parts")))
     return [s for s in slides if s["paragraph"]]
 
 
 def split_sentences(paragraph):
     return [s.strip() for s in SENT_SPLIT.split(paragraph) if s.strip()]
+
+
+SHOW = re.compile(r"\[show\]\s*", re.I)
+
+
+def take_steps(paragraph):
+    """Remove the [show] markers. Returns the clean paragraph, and for each
+    marker the index of the sentence it starts, so the deck's next data-step
+    element appears as that sentence begins. Never spoken, never shown."""
+    kept, steps, pending = [], [], 0
+    for sentence in split_sentences(paragraph):
+        count = len(SHOW.findall(sentence))
+        clean = SHOW.sub("", sentence).strip()
+        if not clean:                       # a marker on its own, before the next sentence
+            pending += count
+            continue
+        steps += [len(kept)] * (pending + count)
+        pending = 0
+        kept.append(clean)
+    steps += [max(len(kept) - 1, 0)] * pending
+    return " ".join(kept), steps
 
 
 # Ending a subtitle line on one of these leaves it dangling into the next line.
@@ -455,9 +476,17 @@ def count_slides(html):
     return len(re.findall(r'<section[^>]*class="[^"]*\bslide\b', html))
 
 
+def step_css(state, steps):
+    """Hide the data-step elements that have not appeared yet. visibility keeps
+    their space, so nothing else on the slide moves when one appears."""
+    hidden = [f'[data-step="{k}"]' for k in range(state + 1, steps + 1)]
+    return f"<style>{','.join(hidden)}{{visibility:hidden!important}}</style>" if hidden else ""
+
+
 def render_slides(html_path, assets, outdir, chrome, log, design_width=1536,
-                  size=(1920, 1080)):
-    """One PNG per slide at the frame size. Returns the list of paths."""
+                  size=(1920, 1080), steps_per_slide=None):
+    """PNGs at the frame size: one list per slide, holding one picture per step
+    (just one picture for a slide with no steps)."""
     width, height = size
     if width <= height:
         design_width = NARROW_DESIGN_WIDTH
@@ -480,32 +509,47 @@ def render_slides(html_path, assets, outdir, chrome, log, design_width=1536,
     # Without its own profile dir, a headless launch is swallowed by an
     # already-running Chrome: it exits 0 and writes no PNG.
     profile = (outdir / "_chrome").resolve()
+    for stale in outdir.glob("*.png"):
+        stale.unlink()
+    steps_per_slide = steps_per_slide or [0] * total
     paths = []
     for index in range(total):
-        page = work / f"slide-{index + 1}.html"
-        page.write_text(
-            html.replace("let currentSlide = 0;", f"let currentSlide = {index};", 1),
-            encoding="utf-8")
-        # Chrome refuses a relative --screenshot path ("Access is denied") but
-        # still exits 0, so the path must be absolute and the result checked.
-        png = (outdir / f"{index + 1}.png").resolve()
-        log(f"  rendering slide {index + 1}/{total}")
-        # The '#1' is required: the deck hides its counter only when the hash is non-empty.
-        # The deck is laid out against a CSS viewport, and how big its text
-        # looks depends on that width, not on the output size. A 1920 screen at
-        # 125% Windows scaling gives the browser a 1536 viewport, so a deck
-        # designed by eye there renders smaller if captured at 1920. Render at
-        # the width it was designed for and scale up to 1080p.
-        subprocess.run([chrome, "--headless=new", "--disable-gpu", "--hide-scrollbars",
-                        f"--force-device-scale-factor={width / design_width:.6f}",
-                        f"--window-size={viewport[0]},{viewport[1]}",
-                        f"--user-data-dir={profile}",
-                        f"--screenshot={png}", page.resolve().as_uri() + "#1"],
-                       check=True, capture_output=True)
-        if not png.exists():
-            raise RuntimeError(f"Chrome wrote no PNG for slide {index + 1}")
-        paths.append(png)
+        steps = steps_per_slide[index] if index < len(steps_per_slide) else 0
+        paths.append([])
+        for state in range(steps + 1):
+            log(f"  rendering slide {index + 1}/{total}"
+                + (f", step {state}/{steps}" if steps else ""))
+            paths[-1].append(render_one(html, index, state, steps, work, outdir, chrome,
+                                        profile, design_width, width, viewport))
     return paths
+
+
+def render_one(html, index, state, steps, work, outdir, chrome, profile,
+               design_width, width, viewport):
+    name = f"{index + 1}" + (f"-{state}" if steps else "")
+    page = work / f"slide-{name}.html"
+    page.write_text(
+        html.replace("let currentSlide = 0;", f"let currentSlide = {index};", 1)
+            .replace("</head>", step_css(state, steps) + "</head>", 1),
+        encoding="utf-8")
+    # Chrome refuses a relative --screenshot path ("Access is denied") but
+    # still exits 0, so the path must be absolute and the result checked.
+    png = (outdir / f"{name}.png").resolve()
+    # The '#1' is required: the deck hides its counter only when the hash is non-empty.
+    # The deck is laid out against a CSS viewport, and how big its text
+    # looks depends on that width, not on the output size. A 1920 screen at
+    # 125% Windows scaling gives the browser a 1536 viewport, so a deck
+    # designed by eye there renders smaller if captured at 1920. Render at
+    # the width it was designed for and scale up to the frame.
+    subprocess.run([chrome, "--headless=new", "--disable-gpu", "--hide-scrollbars",
+                    f"--force-device-scale-factor={width / design_width:.6f}",
+                    f"--window-size={viewport[0]},{viewport[1]}",
+                    f"--user-data-dir={profile}",
+                    f"--screenshot={png}", page.resolve().as_uri() + "#1"],
+                   check=True, capture_output=True)
+    if not png.exists():
+        raise RuntimeError(f"Chrome wrote no PNG for slide {index + 1}")
+    return png
 
 
 # --------------------------------------------------------------------------
@@ -713,8 +757,42 @@ def slide_durations(slide_ends, total, gap_slide):
     return durations
 
 
-def build_filtergraph(durations, opts):
-    """One faded segment per slide, then concat.
+def sentence_starts_per_slide(cues, ranges):
+    """When each sentence starts, grouped by the slide it is spoken on."""
+    starts = [[] for _ in ranges]
+    for start, _, _ in cues:
+        slide = max((i for i, (a, _) in enumerate(ranges) if a <= start + 1e-6), default=0)
+        starts[slide].append(start)
+    return starts
+
+
+def picture_segments(pngs, durations, slides, sentence_starts):
+    """(png, seconds, fade_in, fade_out) for every picture on the timeline.
+
+    A slide with steps is several pictures: the next one replaces the last as
+    its sentence starts. The black fade belongs to the slide, so it goes in at
+    its first picture and out at its last.
+    """
+    segments, slide_start = [], 0.0
+    for index, (images, duration) in enumerate(zip(pngs, durations)):
+        slide_end = slide_start + duration
+        starts = sentence_starts[index] if index < len(sentence_starts) else []
+        times = sorted(
+            min(max(starts[min(at, len(starts) - 1)] if starts else slide_start,
+                    slide_start), slide_end)
+            for at in slides[index].get("steps", [])[:len(images) - 1])
+        bounds = [slide_start] + times + [slide_end]
+        pieces = [(image, bounds[k + 1] - bounds[k]) for k, image in enumerate(images)]
+        # A step on the first word leaves its "before" picture zero seconds long.
+        pieces = [p for p in pieces if p[1] > 0.01] or pieces[-1:]
+        for k, (image, length) in enumerate(pieces):
+            segments.append((image, length, k == 0, k == len(pieces) - 1))
+        slide_start = slide_end
+    return segments
+
+
+def build_filtergraph(segments, opts):
+    """One segment per picture, fades where a slide starts and ends, then concat.
 
     Fades must be local to each segment. Chaining fades on a single timeline
     does not work: fade=t=in:st=X blacks out everything before X, and
@@ -723,16 +801,19 @@ def build_filtergraph(durations, opts):
     fade = opts.fade
     width, height = frame_size(opts)
     chains = []
-    for index, duration in enumerate(durations):
-        out = max(duration - fade, 0.0)
-        fades = ("" if opts.no_fades else
-                 f",fade=t=in:st=0:d={fade},fade=t=out:st={out:.3f}:d={fade}")
+    for index, (_, duration, fade_in, fade_out) in enumerate(segments):
+        fades = ""
+        if not opts.no_fades:
+            if fade_in:
+                fades += f",fade=t=in:st=0:d={fade}"
+            if fade_out:
+                fades += f",fade=t=out:st={max(duration - fade, 0.0):.3f}:d={fade}"
         # The scale only guards against Chrome rounding the PNG a pixel off,
         # which concat would refuse.
         chains.append(f"[{index}:v]scale={width}:{height},fps={opts.fps},setsar=1"
                       f"{fades}[v{index}]")
-    labels = "".join(f"[v{i}]" for i in range(len(durations)))
-    chains.append(f"{labels}concat=n={len(durations)}:v=1:a=0[vc]")
+    labels = "".join(f"[v{i}]" for i in range(len(segments)))
+    chains.append(f"{labels}concat=n={len(segments)}:v=1:a=0[vc]")
     last = "vc"
     if not opts.no_subs:
         # ffmpeg runs from the build dir, so no Windows path escaping is needed.
@@ -746,14 +827,14 @@ def gain(db):
     return 10 ** (float(db) / 20.0)
 
 
-def assemble(build, slides_png, durations, total, opts, log):
+def assemble(build, segments, total, opts, log):
     command = [opts.ffmpeg, "-y"]
-    for png, duration in zip(slides_png, durations):
-        command += ["-loop", "1", "-t", f"{duration:.3f}", "-i", str(png.resolve())]
+    for png, duration, _, _ in segments:
+        command += ["-loop", "1", "-t", f"{duration:.3f}", "-i", str(Path(png).resolve())]
     command += ["-i", "audio.wav"]
-    voice = len(durations)
+    voice = len(segments)
 
-    graph, last = build_filtergraph(durations, opts)
+    graph, last = build_filtergraph(segments, opts)
     audio_map = f"{voice}:a"
     if getattr(opts, "music", None):
         # Looped so a short track still covers the video; amix ends with the
@@ -799,7 +880,8 @@ def run(opts, log=print, audio=None):
     log("rendering slides")
     pngs = render_slides(opts.deck, assets, build / "slides",
                          opts.chrome or find_chrome(), log,
-                         getattr(opts, "design_width", 1536), frame_size(opts))
+                         getattr(opts, "design_width", 1536), frame_size(opts),
+                         [len(s["steps"]) for s in slides])
     if len(pngs) != len(slides):
         raise RuntimeError(
             f"deck has {len(pngs)} slides but the script has {len(slides)}")
@@ -840,13 +922,19 @@ def run(opts, log=print, audio=None):
     clips = write_slide_audio(frames, ranges, build / "voice")
 
     durations = slide_durations(slide_ends, total, opts.gap_slide)
-    assemble(build, pngs, durations, total, opts, log)
+    segments = picture_segments(pngs, durations, slides,
+                                sentence_starts_per_slide(cues, ranges))
+    assemble(build, segments, total, opts, log)
     log(f"done: {opts.out}")
+    # pngs and slide_durations are per picture, so the CapCut draft gets every
+    # step too; fade_after says which pictures end a slide.
     return {"duration": total, "slides": len(pngs), "subtitles": len(events),
             "format": getattr(opts, "format", "video") or "video",
             "size": list(frame_size(opts)), "margin_v": opts.margin_v,
-            "slide_durations": durations, "out": str(Path(opts.out).resolve()),
-            "pngs": [str(p) for p in pngs],
+            "slide_durations": [s[1] for s in segments],
+            "fade_after": [s[3] for s in segments],
+            "out": str(Path(opts.out).resolve()),
+            "pngs": [str(s[0]) for s in segments],
             "voice_clips": clips,
             "events": [[e[0], e[1], e[2]] for e in events]}
 

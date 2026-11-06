@@ -286,7 +286,11 @@ class Draft:
 
     # ---- the three kinds of content -------------------------------------
 
-    def slides(self, pngs, durations, fade_us, with_fades, size=(1920, 1080)):
+    def slides(self, pngs, durations, fade_us, with_fades, size=(1920, 1080),
+               fade_after=None):
+        """fade_after marks the pictures that end a slide. A slide with steps is
+        several pictures, and only its last one fades to the next slide."""
+        fade_after = fade_after or [True] * len(pngs)
         segments, start = [], 0
         for i, (png, dur) in enumerate(zip(pngs, durations)):
             material = copy.deepcopy(self.video_material)
@@ -302,7 +306,8 @@ class Draft:
             # A transition belongs to the segment it starts from, so the last
             # slide never carries one.
             seg["extra_material_refs"] = self._clone_aux(
-                self.exemplars["video"], with_fades and i < len(pngs) - 1, fade_us)
+                self.exemplars["video"],
+                with_fades and fade_after[i] and i < len(pngs) - 1, fade_us)
             length = int(round(dur * US))
             seg["source_timerange"] = {"start": 0, "duration": length}
             seg["target_timerange"] = {"start": start, "duration": length}
@@ -422,7 +427,7 @@ def write(name, pngs, durations, voice_clips, events, total, *,
           fade=0.4666, with_fades=True, music=None, music_volume=0.1,
           music_duration=0.0, style=None, drafts_dir=None,
           app_version=None, overwrite=False, size=(1920, 1080), margin_v=20,
-          log=print):
+          fade_after=None, log=print):
     """Create the draft folder and register it so CapCut lists it."""
     drafts = Path(drafts_dir) if drafts_dir else drafts_folder()
     if drafts is None:
@@ -465,7 +470,7 @@ def write(name, pngs, durations, voice_clips, events, total, *,
 
     draft = Draft()
     draft.doc["canvas_config"].update(width=size[0], height=size[1])
-    draft.slides(pngs, durations, fade * US, with_fades, size)
+    draft.slides(pngs, durations, fade * US, with_fades, size, fade_after)
     draft.voice(voice_clips)
     draft.subtitles(events, style)
     if music:

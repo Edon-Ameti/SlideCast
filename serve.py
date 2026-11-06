@@ -413,6 +413,7 @@ class Handler(BaseHTTPRequestHandler):
                 "script_slides": len(parsed),
                 "sentences": [len(d.split_sentences(s["paragraph"])) for s in parsed],
                 "labels": [s["label"] for s in parsed],
+                "steps": sum(len(s["steps"]) for s in parsed),
             }))
 
         if route == "/pronunciations":
@@ -461,6 +462,7 @@ class Handler(BaseHTTPRequestHandler):
                     music_volume=d.gain(float(payload.get("music_db", -20.0))),
                     size=tuple(r.get("size", (1920, 1080))),
                     margin_v=r.get("margin_v", 20),
+                    fade_after=r.get("fade_after"),
                     log=lambda m: None)
                 return self.send(200, json.dumps({"ok": True, **out}))
             except Exception as exc:
