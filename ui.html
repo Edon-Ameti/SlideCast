@@ -167,6 +167,15 @@
        never run Kokoro, it stays empty until you start it, and the container SlideCast creates
        publishes <b>7860</b>. Type your own URL to override it &mdash; the status line below then
        reports on that URL rather than on the container.</p>
+    <label style="margin-top:16px">Pronunciations</label>
+    <p class="hint" style="margin:0 0 10px">Words Kokoro gets wrong, with the sound to use instead.
+       Every match in the script gets its markup added automatically, so you can write the script
+       as plain text. Matching ignores upper and lower case. English voices only.</p>
+    <div id="pronList"></div>
+    <div class="row" style="margin-top:8px">
+      <button class="mini" id="pronAdd">Add a word</button>
+      <span id="pronSaved" class="hint" style="margin:0"></span>
+    </div>
     <div class="row" style="margin-top:12px">
       <button class="mini" id="genVoice2" style="padding:10px 18px">Generate the voice</button>
       <button class="mini" id="playVoice2" style="padding:10px 18px">Play the voice</button>
@@ -525,9 +534,9 @@ async function inspect() {
     ready = true;
   }
   if (scriptText && !r.has_markup) {
-    notes.push(["warn", `This script has <b>no Kokoro markup</b>, so it looks like the plain
-      <code>voiceover-script.md</code>. It will build, but Kokoro will read <b>dbt</b> as a word and
-      mispronounce <b>AI</b>, <b>query</b> and <b>status</b>. Upload
+    notes.push(["warn", `This script has <b>no Kokoro markup</b>, and none of the words in
+      <b>Pronunciations</b> appear in it either. It will build, but words like <b>dbt</b> or
+      <b>AI</b> may be mispronounced. Add them under Voice &rarr; Pronunciations, or upload
       <code>voiceover-kokoro.txt</code> instead.`]);
   }
   $("inspect").innerHTML = notes.map(([c, h]) =>
@@ -585,6 +594,76 @@ function renderAssets() {
     };
   });
 }
+
+/* ---- pronunciations: saved to pronunciations.json as you edit ---- */
+let pronunciations = [];   // [[word, sound], ...] in display order
+let pronTimer = null;
+
+function renderPronunciations() {
+  $("pronList").innerHTML = pronunciations.map(([word, sound], i) => `
+    <div class="asset" style="grid-template-columns:1fr 1.3fr 80px 80px">
+      <input type="text" class="pw" data-i="${i}" value="${escapeAttr(word)}" placeholder="word">
+      <input type="text" class="ps" data-i="${i}" value="${escapeAttr(sound)}"
+             placeholder="sound, e.g. /dˌibˌitˈi/">
+      <button class="mini ph" data-i="${i}">Hear it</button>
+      <button class="mini danger pr" data-i="${i}">Remove</button>
+    </div>`).join("");
+  document.querySelectorAll(".pw, .ps").forEach(el => {
+    el.oninput = () => {
+      pronunciations[el.dataset.i][el.classList.contains("pw") ? 0 : 1] = el.value;
+      savePronunciations();
+    };
+  });
+  document.querySelectorAll(".pr").forEach(el => {
+    el.onclick = () => {
+      pronunciations.splice(el.dataset.i, 1);
+      renderPronunciations();
+      savePronunciations();
+    };
+  });
+  document.querySelectorAll(".ph").forEach(el => {
+    el.onclick = () => hearPronunciation(el, ...pronunciations[el.dataset.i]);
+  });
+}
+
+function escapeAttr(s) {
+  return String(s).replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;");
+}
+
+function savePronunciations() {
+  clearTimeout(pronTimer);
+  pronTimer = setTimeout(async () => {
+    await fetch("/pronunciations", {method: "POST",
+      body: JSON.stringify({entries: Object.fromEntries(pronunciations)})});
+    $("pronSaved").textContent = "Saved.";
+    if (scriptText) inspect();
+  }, 500);
+}
+
+async function hearPronunciation(button, word, sound) {
+  button.disabled = true;
+  const r = await fetch("/pronounce", {method: "POST", body: JSON.stringify(
+    {word, sound, voice: $("voice").value, speed: num("speed"), kokoro: $("kokoro").value})})
+    .catch(() => null);
+  button.disabled = false;
+  if (!r || !r.ok) {
+    const e = r ? await r.json().catch(() => ({})) : {};
+    $("pronSaved").textContent = e.error || "Kokoro did not answer.";
+    return;
+  }
+  new Audio(URL.createObjectURL(await r.blob())).play();
+}
+
+$("pronAdd").onclick = () => {
+  pronunciations.push(["", ""]);
+  renderPronunciations();
+  $("pronList").querySelector(`.pw[data-i="${pronunciations.length - 1}"]`).focus();
+};
+
+fetch("/pronunciations").then(r => r.json()).then(entries => {
+  pronunciations = Object.entries(entries);
+  renderPronunciations();
+}).catch(() => {});
 
 /* ---- script editor ---- */
 $("scriptEdit").onclick = () => {
@@ -657,7 +736,8 @@ function preflight() {
 
   const warns = [];
   if (!report.has_markup)
-    warns.push("The script has no Kokoro markup. Pronunciation will be wrong.");
+    warns.push("The script has no Kokoro markup and no word from Pronunciations. "
+             + "Some words may be mispronounced.");
   if (!kokoroOK)
     warns.push("Kokoro is not answering yet. The build will try to start it first, which can "
              + "take a minute or two if Docker Desktop has to launch.");

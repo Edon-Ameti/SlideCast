@@ -53,7 +53,7 @@ def voice_key(payload):
     o = payload.get("options", {})
     parts = [payload.get("script", "")] + [token(o.get(k)) for k in
              ("voice", "speed", "lead_in", "tail", "gap_sentence", "gap_slide",
-              "chunk")]
+              "chunk")] + [d.load_pronunciations()]
     return hashlib.sha1(json.dumps(parts).encode("utf-8")).hexdigest()
 
 
@@ -127,6 +127,7 @@ def job(payload):
             voice=o.get("voice", "af_sky"),
             speed=float(o.get("speed", 1.0)),
             kokoro=o.get("kokoro") or kokoro.convert_url(),
+            pronunciations=str(d.PRONUNCIATIONS),
             lead_in=float(o.get("lead_in", 0.6)),
             tail=float(o.get("tail", 1.2)),
             gap_sentence=float(o.get("gap_sentence", 0.28)),
@@ -193,6 +194,7 @@ def voice_job(payload):
             script=str(WORK / "voiceover.txt"),
             voice=o.get("voice", "af_sky"), speed=float(o.get("speed", 1.0)),
             kokoro=o.get("kokoro") or kokoro.convert_url(),
+            pronunciations=str(d.PRONUNCIATIONS),
             lead_in=float(o.get("lead_in", 0.6)), tail=float(o.get("tail", 1.2)),
             gap_sentence=float(o.get("gap_sentence", 0.28)),
             gap_slide=float(o.get("gap_slide", 1.1)),
@@ -376,6 +378,8 @@ class Handler(BaseHTTPRequestHandler):
                  "voice_ready": (CACHE / "voice.wav").exists()}))
         if route == "/subs":
             return self.send_file(WORK / "build" / "subs.srt", "text/plain; charset=utf-8")
+        if route == "/pronunciations":
+            return self.send(200, json.dumps(d.load_pronunciations(), ensure_ascii=False))
         return self.send(404, json.dumps({"error": "no such route"}))
 
     def do_POST(self):
@@ -400,11 +404,34 @@ class Handler(BaseHTTPRequestHandler):
                 "missing": missing,
                 # No markup means the plain voiceover-script.md was uploaded by
                 # mistake: it builds fine but Kokoro mispronounces dbt, AI, query.
-                "has_markup": bool(d.MARKUP.search(script)),
+                # Words the pronunciation list covers count as marked up.
+                "has_markup": bool(d.MARKUP.search(
+                    d.apply_pronunciations(script, d.load_pronunciations()))),
                 "script_slides": len(parsed),
                 "sentences": [len(d.split_sentences(s["paragraph"])) for s in parsed],
                 "labels": [s["label"] for s in parsed],
             }))
+
+        if route == "/pronunciations":
+            entries = {w.strip(): s.strip() for w, s in payload.get("entries", {}).items()
+                       if w.strip() and s.strip()}
+            d.PRONUNCIATIONS.write_text(
+                json.dumps(entries, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+            return self.send(200, json.dumps({"ok": True, "count": len(entries)}))
+
+        if route == "/pronounce":
+            # Speaks one word with its sound, so a pronunciation can be checked by ear.
+            word, sound = payload.get("word", "").strip(), payload.get("sound", "").strip()
+            if not (word and sound):
+                return self.send(400, json.dumps({"error": "Fill in the word and its sound."}))
+            text = d.apply_pronunciations(word, {word: sound})
+            url = payload.get("kokoro") or kokoro.convert_url()
+            try:
+                wav = d.synthesize(text, payload.get("voice", "af_sky"),
+                                   float(payload.get("speed", 1.0)), url)
+            except Exception as exc:
+                return self.send(502, json.dumps({"error": f"Kokoro did not answer: {exc}"}))
+            return self.send(200, wav, "audio/wav")
 
         if route == "/capcut/folder":
             # Opens the OS folder chooser; blocks until the user picks.

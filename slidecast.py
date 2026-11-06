@@ -52,6 +52,50 @@ def strip_markup(text):
     return MARKUP.sub(r"\1", text)
 
 
+PRONUNCIATIONS = Path(__file__).parent / "pronunciations.json"
+
+
+def load_pronunciations(path=PRONUNCIATIONS):
+    """{word: sound}. A missing file is an empty dictionary, not an error."""
+    if not path or not Path(path).exists():
+        return {}
+    return json.loads(Path(path).read_text(encoding="utf-8"))
+
+
+def is_english_voice(voice):
+    """Kokoro's English voices are af_/am_ (American) and bf_/bm_ (British)."""
+    return voice[:1] in ("a", "b")
+
+
+def apply_pronunciations(text, dictionary):
+    """Add Kokoro markup to every whole-word match, so a plain script is enough.
+
+    Matching ignores case but keeps the spelling as written, which is what the
+    subtitles show. Words that already carry markup are left alone. Longer
+    entries win, so "VS Code" is matched before "VS".
+    """
+    if not dictionary:
+        return text
+    sounds = {word.lower(): sound if sound.startswith("/") else f"/{sound.strip('/')}/"
+              for word, sound in dictionary.items() if word.strip() and sound.strip()}
+    if not sounds:
+        return text
+    words = sorted(sounds, key=len, reverse=True)
+    pattern = re.compile(r"(?<![\w\[])(" + "|".join(map(re.escape, words)) + r")(?![\w\]])",
+                         re.I)
+
+    def mark(match):
+        return f"[{match.group(1)}]({sounds[match.group(1).lower()]})"
+
+    pieces, last = [], 0
+    for existing in MARKUP.finditer(text):
+        pieces.append(pattern.sub(mark, text[last:existing.start()]))
+        pieces.append(existing.group(0))
+        last = existing.end()
+    pieces.append(pattern.sub(mark, text[last:]))
+    return "".join(pieces)
+
+
 def parse_script(path):
     """Return [{n, label, paragraph}], one entry per slide, in file order."""
     slides, current = [], None
@@ -267,6 +311,8 @@ def build_audio(slides, opts, log, cache_dir=None):
     per_slide = getattr(opts, "chunk", "slide") == "slide"
     cache_dir = Path(cache_dir) if cache_dir else None
     used_keys = set()
+    dictionary = (load_pronunciations(getattr(opts, "pronunciations", None))
+                  if is_english_voice(opts.voice) else {})
     track = bytearray()
     cues, slide_ends = [], []
     track += silence(opts.lead_in)
@@ -277,7 +323,8 @@ def build_audio(slides, opts, log, cache_dir=None):
             where = f"  slide {index + 1}/{len(slides)}"
             if not per_slide:
                 where += f", sentence {position + 1}/{len(units)}"
-            frames, from_cache = speak_piece(unit, opts, cache_dir, used_keys)
+            frames, from_cache = speak_piece(apply_pronunciations(unit, dictionary),
+                                             opts, cache_dir, used_keys)
             log(where + (" (unchanged, reused)" if from_cache else ""))
             start = len(track) / 2 / SAMPLE_RATE
             track += frames
@@ -780,6 +827,9 @@ def build_parser():
     p.add_argument("--voice", default="af_sky")
     p.add_argument("--speed", type=float, default=1.0)
     p.add_argument("--kokoro", default=KOKORO_URL)
+    p.add_argument("--pronunciations", default=str(PRONUNCIATIONS),
+                   help="JSON of {word: sound}; matching words get Kokoro markup "
+                        "automatically (English voices only)")
     p.add_argument("--lead-in", type=float, default=0.6, dest="lead_in")
     p.add_argument("--tail", type=float, default=1.2)
     p.add_argument("--gap-sentence", type=float, default=0.28, dest="gap_sentence")
