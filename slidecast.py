@@ -1047,17 +1047,26 @@ def build_parser():
     return p
 
 
-def main():
-    parser = build_parser()
-    opts = parser.parse_args()
+def finish_options(opts):
+    """Fill in what depends on other settings, and refuse a fade that would
+    cover speech. Shared by the command line and the drop folder."""
     for key in ("font_size", "max_chars", "margin_v"):
         if getattr(opts, key) is None:
             setattr(opts, key, FORMATS[opts.format][key])
     if opts.highlight:
         opts.align_words = True
     if opts.gap_slide < 2 * opts.fade:
-        parser.error(f"--gap-slide must be at least twice --fade "
-                     f"({2 * opts.fade}) or the fade would cover speech")
+        raise ValueError(f"--gap-slide must be at least twice --fade "
+                         f"({2 * opts.fade}) or the fade would cover speech")
+    return opts
+
+
+def main():
+    parser = build_parser()
+    try:
+        opts = finish_options(parser.parse_args())
+    except ValueError as exc:
+        parser.error(str(exc))
     run(opts)
 
 
