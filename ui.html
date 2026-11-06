@@ -328,6 +328,21 @@
       <button class="btn secondary" id="dl" hidden>Download MP4</button>
       <button class="btn secondary" id="dlsub" hidden>Download .srt</button>
     </div>
+    <div id="publish" hidden>
+      <label style="margin-top:16px">For YouTube</label>
+      <pre id="chapterText" style="margin-top:0"></pre>
+      <div class="row" style="margin-top:8px">
+        <button class="mini" id="copyChapters">Copy chapters</button>
+        <a class="mini" id="dlChapters" href="/chapters" download="chapters.txt"
+           style="text-decoration:none">Download chapters</a>
+        <a class="mini" id="dlThumb" href="/thumbnail" download="thumbnail.jpg"
+           style="text-decoration:none">Download thumbnail</a>
+      </div>
+      <div id="chapterNote"></div>
+      <p class="hint">Paste the chapters into the video's description and YouTube turns them
+         into chapters on the timeline. The thumbnail is the first slide with everything on it
+         showing.</p>
+    </div>
     <div id="resultNote"></div>
     <pre id="log" hidden></pre>
     <div id="player"></div>
@@ -859,6 +874,7 @@ $("confirmGo").onclick = async () => {
   $("resultNote").innerHTML = "";
   $("dl").hidden = $("dlsub").hidden = true;
   $("capcutPanel").hidden = true;
+  $("publish").hidden = true;
   await fetch("/build", {method: "POST",
     body: JSON.stringify({deck: deckText, script: scriptText,
                           assets: assetFiles, options: collectOptions()})});
@@ -876,6 +892,13 @@ function showResult(r, fromEarlier) {
   $("player").innerHTML = `<video controls src="/video?t=${Date.now()}"></video>`;
   $("dl").hidden = $("dlsub").hidden = false;
   $("capcutPanel").hidden = false;
+  $("publish").hidden = !r.chapters;
+  if (r.chapters) {
+    $("chapterText").textContent = r.chapters.join("\n");
+    $("chapterNote").innerHTML = (r.chapter_problems || []).map(p =>
+      `<div class="status warn">${p} The list is still written; YouTube just will not show
+       chapters until it is fixed.</div>`).join("");
+  }
   $("resultNote").innerHTML = fromEarlier
     ? `<div class="status ok">A finished video is still here from an earlier build &mdash;
        ${describe(r)}. It stays until you build again, so you cannot lose it by refreshing.</div>`
@@ -1160,6 +1183,11 @@ function saveVideo() {
 }
 
 $("dl").onclick = saveVideo;
+$("copyChapters").onclick = async () => {
+  await navigator.clipboard.writeText($("chapterText").textContent);
+  $("copyChapters").textContent = "Copied";
+  setTimeout(() => { $("copyChapters").textContent = "Copy chapters"; }, 1500);
+};
 $("dlsub").onclick = () => location.href = "/subs";
 
 /* Kokoro lives in Docker. Show whether it is up, and offer to start it, rather

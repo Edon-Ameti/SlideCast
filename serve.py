@@ -383,6 +383,10 @@ class Handler(BaseHTTPRequestHandler):
             return self.send_file(WORK / "build" / "subs.srt", "text/plain; charset=utf-8")
         if route == "/pronunciations":
             return self.send(200, json.dumps(d.load_pronunciations(), ensure_ascii=False))
+        if route == "/chapters":
+            return self.send_file(WORK / "video-chapters.txt", "text/plain; charset=utf-8")
+        if route == "/thumbnail":
+            return self.send_file(WORK / "video-thumbnail.jpg", "image/jpeg")
         return self.send(404, json.dumps({"error": "no such route"}))
 
     def do_POST(self):

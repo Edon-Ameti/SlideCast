@@ -858,6 +858,48 @@ def assemble(build, segments, total, opts, log):
 
 
 # --------------------------------------------------------------------------
+# chapters and thumbnail
+# --------------------------------------------------------------------------
+
+def chapter_time(seconds):
+    """YouTube's own format: 0:00, 1:05, 1:02:03."""
+    seconds = int(seconds)
+    h, rest = divmod(seconds, 3600)
+    m, s = divmod(rest, 60)
+    return f"{h}:{m:02d}:{s:02d}" if h else f"{m}:{s:02d}"
+
+
+def chapter_lines(slides, durations):
+    """One line per slide, starting where the slide appears on screen."""
+    lines, start = [], 0.0
+    for slide, duration in zip(slides, durations):
+        lines.append(f"{chapter_time(start)} {slide['label'] or 'Slide ' + str(slide['n'])}")
+        start += duration
+    return lines
+
+
+def chapter_problems(durations):
+    """YouTube ignores the chapter list unless all of these hold."""
+    problems = []
+    if len(durations) < 3:
+        problems.append("YouTube needs at least 3 chapters; this video has "
+                        f"{len(durations)} slides.")
+    short = [i + 1 for i, d in enumerate(durations) if d < 10]
+    if short:
+        problems.append("YouTube needs every chapter to last at least 10 seconds; "
+                        f"slide {', '.join(map(str, short))} "
+                        f"{'is' if len(short) == 1 else 'are'} shorter.")
+    return problems
+
+
+def write_thumbnail(png, path, size, ffmpeg="ffmpeg"):
+    """The first slide with everything shown. A wide video gets YouTube's
+    recommended 1280x720; other shapes keep their full size. JPEG, because
+    YouTube refuses a thumbnail over 2 MB."""
+    scale = ["-vf", "scale=1280:720"] if size == (1920, 1080) else []
+    subprocess.run([ffmpeg, "-v", "error", "-y", "-i", str(png), *scale, "-q:v", "2",
+                    str(path)], check=True)
+
 
 def run(opts, log=print, audio=None):
     """audio is an already-built (frames, cues, slide_ends, total), so a music
@@ -925,6 +967,14 @@ def run(opts, log=print, audio=None):
     segments = picture_segments(pngs, durations, slides,
                                 sentence_starts_per_slide(cues, ranges))
     assemble(build, segments, total, opts, log)
+
+    out = Path(opts.out).resolve()
+    chapters = chapter_lines(slides, durations)
+    chapters_file = out.with_name(out.stem + "-chapters.txt")
+    chapters_file.write_text("\n".join(chapters) + "\n", encoding="utf-8")
+    thumbnail = out.with_name(out.stem + "-thumbnail.jpg")
+    write_thumbnail(pngs[0][-1], thumbnail, frame_size(opts), opts.ffmpeg)
+    log("chapters and thumbnail written next to the video")
     log(f"done: {opts.out}")
     # pngs and slide_durations are per picture, so the CapCut draft gets every
     # step too; fade_after says which pictures end a slide.
@@ -933,6 +983,8 @@ def run(opts, log=print, audio=None):
             "size": list(frame_size(opts)), "margin_v": opts.margin_v,
             "slide_durations": [s[1] for s in segments],
             "fade_after": [s[3] for s in segments],
+            "chapters": chapters, "chapter_problems": chapter_problems(durations),
+            "chapters_file": str(chapters_file), "thumbnail": str(thumbnail),
             "out": str(Path(opts.out).resolve()),
             "pngs": [str(s[0]) for s in segments],
             "voice_clips": clips,
