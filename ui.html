@@ -26,8 +26,17 @@
   label{display:block;font-size:12px;color:var(--muted);margin-bottom:5px}
   input[type=file]{width:100%;padding:9px;background:#05060a;border:1px dashed var(--line);
                    border-radius:6px;color:var(--muted);font-size:13px}
-  input[type=number],input[type=text],select{width:100%;padding:8px 10px;background:#05060a;
-      border:1px solid var(--line);border-radius:6px;color:var(--text);font-size:13px}
+  input[type=number],input[type=text],input[type=password],select{width:100%;padding:8px 10px;
+      background:#05060a;border:1px solid var(--line);border-radius:6px;color:var(--text);
+      font-size:13px}
+  .ta{width:100%;background:#05060a;color:var(--text);border:1px solid var(--line);
+      border-radius:6px;padding:9px 10px;font:13px/1.5 "Segoe UI",system-ui,sans-serif;
+      resize:vertical}
+  .card{border:1px solid var(--line);border-radius:8px;padding:14px;margin-top:12px;
+        background:#05060a}
+  .card .ta,.card input{background:var(--panel)}
+  .card h4{margin:0 0 10px;font-size:12px;color:var(--orange2);text-transform:uppercase;
+           letter-spacing:.08em}
   .grid{display:grid;gap:12px}
   .g2{grid-template-columns:1fr 1fr}
   .g3{grid-template-columns:repeat(3,1fr)}
@@ -123,6 +132,49 @@
   </div>
   <p class="sub">Slide deck plus voiceover script in, finished MP4 out. Fades, timing and
      subtitles are derived from the narration itself.</p>
+
+  <div class="panel">
+    <h2>Write with AI &middot; optional</h2>
+    <p class="hint" style="margin:-6px 0 15px">Give a topic or paste your notes, and an AI writes
+       the slides and the narration for you to check. It uses <b>your own API key</b>, so the AI
+       service bills you directly and SlideCast costs nothing. The key stays in this page only: it is
+       never saved, and reloading the page forgets it.</p>
+    <div class="grid g3">
+      <div><label>AI service</label><select id="aiProvider"></select></div>
+      <div><label>Model</label><input type="text" id="aiModel"></div>
+      <div id="aiBaseWrap" hidden><label>Address</label>
+        <input type="text" id="aiBase" placeholder="e.g. http://localhost:11434/v1"></div>
+    </div>
+    <div class="grid g3" style="margin-top:12px">
+      <div style="grid-column:span 2"><label>API key</label>
+        <input type="password" id="aiKey" autocomplete="off" spellcheck="false"
+               placeholder="paste your key (not needed for a local Ollama or LM Studio)"></div>
+      <div><label>&nbsp;</label>
+        <button class="mini" id="aiTest" style="width:100%;padding:9px">Test the key</button></div>
+    </div>
+    <label style="margin-top:14px">Topic or notes</label>
+    <textarea class="ta" id="aiTopic" rows="5"
+      placeholder="e.g. Why local-first apps are coming back: speed, privacy, working offline."></textarea>
+    <div class="grid g4" style="margin-top:12px">
+      <div><label>Number of slides</label>
+        <input type="number" id="aiSlides" value="6" min="2" max="15"></div>
+    </div>
+    <p class="hint">The slides are made in the shape picked under Build &rarr; Format, and fit any
+       of the four.</p>
+    <div class="row" style="margin-top:6px">
+      <button class="btn primary" id="aiWrite">Write the deck</button>
+    </div>
+    <div id="aiStatus"></div>
+    <div id="aiReview" hidden>
+      <p class="hint" style="margin-top:16px">Check and edit everything below, then press
+         <b>Use this</b>. On a bullet slide, <code>[show]</code> in the narration marks the sentence
+         where the next bullet appears, so keep one per bullet.</p>
+      <div id="aiSlidesList"></div>
+      <div class="row" style="margin-top:14px">
+        <button class="btn primary" id="aiUse">Use this</button>
+      </div>
+    </div>
+  </div>
 
   <div class="panel">
     <h2>1 &middot; Inputs</h2>
@@ -450,6 +502,7 @@ function saveSession() {
   saveTimer = setTimeout(() => {
     fetch("/session", {method: "POST", body: JSON.stringify(
       {deckText, scriptText, deckName, scriptName, assetFiles, assetNames,
+       aiDeck, deckFromAI, aiTopic: $("aiTopic").value,
        options: collectOptions()})}).catch(() => {});
   }, 400);
 }
@@ -520,6 +573,106 @@ function updateFormatNote() {
     `<div class="status ${c}">${h}</div>`).join("");
 }
 
+/* ---- write with AI, on the user's own key ---- */
+let AI_PROVIDERS = {}, aiDeck = null;
+
+const aiReady = fetch("/ai/providers").then(r => r.json()).then(p => {
+  AI_PROVIDERS = p;
+  $("aiProvider").innerHTML = Object.entries(p).map(([k, v]) =>
+    `<option value="${k}">${v.label}</option>`).join("");
+  aiProviderChanged(true);
+});
+
+/* The key lives only in this field. It is sent with each AI request and is
+   deliberately left out of collectOptions, so it never reaches session.json. */
+function aiSettings() {
+  return {provider: $("aiProvider").value, model: $("aiModel").value.trim(),
+          base_url: $("aiBase").value.trim(), key: $("aiKey").value.trim()};
+}
+
+function aiProviderChanged(keepModel) {
+  const p = AI_PROVIDERS[$("aiProvider").value] || {};
+  if (!keepModel || !$("aiModel").value) $("aiModel").value = p.model || "";
+  $("aiModel").placeholder = p.model ? "" : "e.g. llama3.3 or openai/gpt-6-astra";
+  $("aiBaseWrap").hidden = $("aiProvider").value !== "compatible";
+}
+$("aiProvider").onchange = () => { aiProviderChanged(false); saveSession(); };
+
+function aiNote(cls, html) {
+  $("aiStatus").innerHTML = `<div class="status ${cls}">${html}</div>`;
+}
+
+$("aiTest").onclick = async () => {
+  $("aiTest").disabled = true;
+  aiNote("", "Asking the AI service&hellip;");
+  const r = await fetch("/ai/test", {method: "POST", body: JSON.stringify({ai: aiSettings()})})
+    .then(x => x.json()).catch(() => ({ok: false, error: "SlideCast did not answer."}));
+  $("aiTest").disabled = false;
+  aiNote(r.ok ? "ok" : "bad", r.ok
+    ? `The key works. The model answered: <b>${escapeAttr(r.reply)}</b>`
+    : escapeAttr(r.error));
+};
+
+$("aiWrite").onclick = async () => {
+  $("aiWrite").disabled = true;
+  aiNote("warn", "Writing the deck. This usually takes under a minute&hellip;");
+  const r = await fetch("/ai/deck", {method: "POST", body: JSON.stringify(
+    {ai: aiSettings(), topic: $("aiTopic").value, slides: num("aiSlides"),
+     format: currentFormat})})
+    .then(x => x.json()).catch(() => ({ok: false, error: "SlideCast did not answer."}));
+  $("aiWrite").disabled = false;
+  if (!r.ok) return aiNote("bad", escapeAttr(r.error));
+  aiDeck = r.deck;
+  aiNote("ok", `Written: <b>${aiDeck.slides.length}</b> slides. Check them below.`);
+  renderAiReview();
+  saveSession();
+};
+
+/* Every field edits aiDeck directly, so Use this sends exactly what is shown. */
+function renderAiReview() {
+  $("aiReview").hidden = !aiDeck;
+  if (!aiDeck) return;
+  $("aiSlidesList").innerHTML = aiDeck.slides.map((s, i) => `
+    <div class="card">
+      <h4>Slide ${i + 1} &middot; ${s.kind}</h4>
+      <div class="grid g3">
+        <div><label>Label</label><input type="text" data-i="${i}" data-f="label"
+             value="${escapeAttr(s.label || "")}"></div>
+        <div style="grid-column:span 2"><label>Heading</label><input type="text" data-i="${i}"
+             data-f="heading" value="${escapeAttr(s.heading || "")}"></div>
+      </div>
+      <label style="margin-top:10px">Supporting line</label>
+      <input type="text" data-i="${i}" data-f="subheading" value="${escapeAttr(s.subheading || "")}">
+      ${s.kind === "bullets" ? `<label style="margin-top:10px">Bullets, one per line</label>
+        <textarea class="ta" rows="${(s.bullets || []).length + 1}" data-i="${i}"
+          data-f="bullets">${escapeAttr((s.bullets || []).join("\n"))}</textarea>` : ""}
+      <label style="margin-top:10px">Narration</label>
+      <textarea class="ta" rows="4" data-i="${i}" data-f="narration">${escapeAttr(s.narration || "")}</textarea>
+    </div>`).join("");
+  document.querySelectorAll("#aiSlidesList [data-f]").forEach(el => {
+    el.oninput = () => {
+      const slide = aiDeck.slides[el.dataset.i];
+      slide[el.dataset.f] = el.dataset.f === "bullets"
+        ? el.value.split("\n").map(x => x.trim()).filter(Boolean) : el.value;
+      saveSession();
+    };
+  });
+}
+
+$("aiUse").onclick = async () => {
+  const r = await fetch("/ai/render", {method: "POST", body: JSON.stringify({deck: aiDeck})})
+    .then(x => x.json()).catch(() => ({}));
+  if (!r.html) return aiNote("bad", "Could not turn that into slides.");
+  deckText = r.html; scriptText = r.script;
+  deckName = "ai-deck.html"; scriptName = "ai-voiceover.txt";
+  assetFiles = {}; assetNames = {};
+  deckFromAI = true;
+  aiNote(r.problem ? "warn" : "ok", r.problem
+    ? `Loaded into Inputs, but check this: ${escapeAttr(r.problem)}.`
+    : "Loaded into Inputs below. Pick a voice and build, or keep editing and press Use this again.");
+  await inspect();
+};
+
 /* Subtitles shown at panel width, so the sample is the real proportion. */
 function updateSubPreview() {
   const frameWidth = (FORMATS[currentFormat] || {size: [1920]}).size[0];
@@ -572,6 +725,7 @@ $("deck").onchange = async e => {
   const f = e.target.files[0]; if (!f) return;
   deckText = await readText(f); deckName = f.name;
   assetFiles = {}; assetNames = {};
+  deckFromAI = false;
   inspect();
 };
 $("script").onchange = async e => {
@@ -581,6 +735,7 @@ $("script").onchange = async e => {
 };
 $("deckRemove").onclick = () => {
   deckText = ""; deckName = ""; missing = []; assetFiles = {}; assetNames = {};
+  deckFromAI = false;
   $("deck").value = ""; inspect();
 };
 $("scriptRemove").onclick = () => {
@@ -618,7 +773,8 @@ async function inspect() {
       (missing.length ? ` ${missing.length} screenshot(s) still needed.` : "")]);
     ready = true;
   }
-  if (scriptText && !r.has_markup) {
+  // The warning catches the plain script uploaded by mistake, which an AI deck cannot be.
+  if (scriptText && !r.has_markup && !deckFromAI) {
     notes.push(["warn", `This script has <b>no Kokoro markup</b>, and none of the words in
       <b>Pronunciations</b> appear in it either. It will build, but words like <b>dbt</b> or
       <b>AI</b> may be mispronounced. Add them under Voice &rarr; Pronunciations, or upload
@@ -789,6 +945,7 @@ function collectOptions() {
     chunk: $("chunk").value,
     design_width: num("design_width"),
     format: currentFormat,
+    ai_provider: $("aiProvider").value, ai_model: $("aiModel").value, ai_base: $("aiBase").value,
     text_colour: PRESETS[$("preset").value].text,
     outline_colour: PRESETS[$("preset").value].outline,
     outline: PRESETS[$("preset").value].width === undefined
@@ -824,7 +981,7 @@ function preflight() {
     `<div><span class="k">${k}</span><span class="v">${v}</span></div>`).join("");
 
   const warns = [];
-  if (!report.has_markup)
+  if (!report.has_markup && !deckFromAI)
     warns.push("The script has no Kokoro markup and no word from Pronunciations. "
              + "Some words may be mispronounced.");
   if (!kokoroOK)
@@ -1276,15 +1433,25 @@ function applyOptions(o) {
   if (o.highlight_colour) $("highlight_colour").value = o.highlight_colour;
   if (o.chunk) $("chunk").value = o.chunk;
   if (o.format) setFormat(o.format, false);
+  if (o.ai_provider && AI_PROVIDERS[o.ai_provider]) {
+    $("aiProvider").value = o.ai_provider;
+    $("aiModel").value = o.ai_model || "";
+    $("aiBase").value = o.ai_base || "";
+    aiProviderChanged(true);
+  }
 }
 
 async function boot() {
   refreshKokoro();          // not awaited: it can resolve while the session loads
   await voicesReady;
   await formatsReady;
+  await aiReady;
   const s = await fetch("/session").then(r => r.json()).catch(() => ({}));
   restoring = true;
   if (s && s.options) applyOptions(s.options);
+  if (s && s.aiTopic) $("aiTopic").value = s.aiTopic;
+  if (s && s.aiDeck) { aiDeck = s.aiDeck; renderAiReview(); }
+  deckFromAI = !!(s && s.deckFromAI);
   if (s && s.deckText) {
     deckText = s.deckText; scriptText = s.scriptText || "";
     deckName = s.deckName || ""; scriptName = s.scriptName || "";

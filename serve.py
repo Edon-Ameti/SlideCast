@@ -18,6 +18,8 @@ from urllib.parse import parse_qs, urlparse
 import slidecast as d
 import kokoro_docker as kokoro
 import capcut_export as capcut
+import ai
+import deck_template
 
 HERE = Path(__file__).parent
 WORK = HERE / "workspace"
@@ -333,6 +335,8 @@ class Handler(BaseHTTPRequestHandler):
             return self.send(200, json.dumps({"voices": VOICES}))
         if route == "/formats":
             return self.send(200, json.dumps(d.FORMATS))
+        if route == "/ai/providers":
+            return self.send(200, json.dumps(ai.PROVIDERS))
         if route == "/status":
             return self.send(200, json.dumps(JOB))
         if route == "/kokoro":
@@ -419,6 +423,37 @@ class Handler(BaseHTTPRequestHandler):
                 "labels": [s["label"] for s in parsed],
                 "steps": sum(len(s["steps"]) for s in parsed),
             }))
+
+        # The AI routes get the user's API key in the body of each request. It is
+        # used for that call only: never logged, never written to disk.
+        if route == "/ai/test":
+            try:
+                reply = ai.complete(payload.get("ai", {}), "Reply with the single word OK.",
+                                    "Are you there?", timeout=60)
+                return self.send(200, json.dumps({"ok": True, "reply": reply.strip()[:80]}))
+            except ai.AIError as exc:
+                return self.send(200, json.dumps({"ok": False, "error": str(exc)}))
+
+        if route == "/ai/deck":
+            try:
+                count = max(2, min(15, int(payload.get("slides", 6))))
+                topic = (payload.get("topic") or "").strip()
+                if not topic:
+                    raise ai.AIError("Write the topic or paste your notes first.")
+                deck = ai.write_deck(payload.get("ai", {}), topic, count,
+                                     payload.get("format", "video"))
+                return self.send(200, json.dumps({"ok": True, "deck": deck}))
+            except ai.AIError as exc:
+                return self.send(200, json.dumps({"ok": False, "error": str(exc)}))
+
+        if route == "/ai/render":
+            deck = payload.get("deck") or {}
+            if not deck.get("slides"):
+                return self.send(400, json.dumps({"error": "No slides to render."}))
+            return self.send(200, json.dumps({
+                "html": deck_template.render_deck(deck, payload.get("lang", "en")),
+                "script": deck_template.render_script(deck),
+                "problem": ai.deck_problem(deck, len(deck["slides"]))}))
 
         if route == "/pronunciations":
             entries = {w.strip(): s.strip() for w, s in payload.get("entries", {}).items()
