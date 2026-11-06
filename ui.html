@@ -92,6 +92,16 @@
   .check div:last-child{border-bottom:0}
   .check .k{color:var(--muted);width:172px;flex:none}
   .check .v{color:var(--text);font-weight:600}
+  /* format picker: one card per shape, drawn at its own proportions */
+  .fmt{display:flex;flex-direction:column;align-items:center;gap:7px;padding:12px 8px;
+       background:#05060a;border:1px solid var(--line);border-radius:8px;cursor:pointer;
+       color:var(--muted);font:inherit;text-align:center}
+  .fmt:hover{border-color:rgba(255,255,255,.3)}
+  .fmt.on{border-color:var(--orange);color:var(--text)}
+  .fmt .shape{border:2px solid currentColor;border-radius:3px}
+  .fmt.on .shape{border-color:var(--orange);background:rgba(255,122,26,.15)}
+  .fmt b{font-size:13px}
+  .fmt small{font-size:11px;line-height:1.35}
 </style>
 </head>
 <body>
@@ -237,7 +247,7 @@
           <option value="Palatino Linotype" style="font-family:'Palatino Linotype', serif;font-size:15px">Palatino Linotype</option>
           <option value="Courier New" style="font-family:'Courier New', monospace;font-size:15px">Courier New</option>
         </select></div>
-      <div><label>Size (px at 1080p)</label><input type="number" id="font_size" value="54"></div>
+      <div><label>Size (px in the video)</label><input type="number" id="font_size" value="54"></div>
       <div><label>Black outline</label><input type="number" id="outline" value="4"></div>
       <div><label>Height off bottom</label><input type="number" id="margin_v" value="20"></div>
     </div>
@@ -298,9 +308,12 @@
 
   <div class="panel">
     <h2>8 &middot; Build</h2>
+    <label>Format</label>
+    <div id="formatPick" class="grid g4" style="margin-bottom:6px"></div>
+    <div id="formatNote" style="margin-bottom:16px"></div>
     <div class="grid g4" style="margin-bottom:16px">
       <div><label>Frame rate (fps)</label><input type="number" id="fps" value="30"></div>
-      <div><label>Deck design width (px)</label>
+      <div id="designWidthWrap"><label>Deck design width (px)</label>
         <select id="design_width">
           <option value="1536" selected>1536 &mdash; browser at 125% scaling</option>
           <option value="1920">1920 &mdash; true 1:1</option>
@@ -437,9 +450,65 @@ document.addEventListener("input", e => {
 
 /* The fade lives inside the pause between slides, so the two panels are linked.
    Show that relationship rather than only failing at build time. */
-/* 1080p subtitles shown at panel width, so the sample is the real proportion. */
+/* ---- format: the shape of the video ---- */
+let FORMATS = {}, currentFormat = "video";
+// True while the deck came from the AI writer, whose design fits every format.
+let deckFromAI = false;
+
+const formatsReady = fetch("/formats").then(r => r.json()).then(f => {
+  FORMATS = f;
+  renderFormats();
+});
+
+function renderFormats() {
+  $("formatPick").innerHTML = Object.entries(FORMATS).map(([name, f]) => {
+    const [w, h] = f.size, scale = 34 / Math.max(w, h);
+    const title = name[0].toUpperCase() + name.slice(1);
+    return `<button type="button" class="fmt${name === currentFormat ? " on" : ""}"
+              data-format="${name}">
+      <span class="shape" style="width:${Math.round(w * scale)}px;height:${Math.round(h * scale)}px"></span>
+      <b>${title}</b><small>${w}&times;${h}</small></button>`;
+  }).join("");
+  document.querySelectorAll(".fmt").forEach(el => {
+    el.onclick = () => setFormat(el.dataset.format, true);
+  });
+  updateFormatNote();
+}
+
+/* Picking a format resets the subtitle settings to the ones that suit it;
+   they can still be changed afterwards. */
+function setFormat(name, applyDefaults) {
+  if (!FORMATS[name]) return;
+  currentFormat = name;
+  if (applyDefaults) {
+    const f = FORMATS[name];
+    $("font_size").value = f.font_size;
+    $("max_chars").value = f.max_chars;
+    $("margin_v").value = f.margin_v;
+  }
+  renderFormats();
+  updateSubPreview();
+  saveSession();
+}
+
+function updateFormatNote() {
+  const f = FORMATS[currentFormat];
+  if (!f) return;
+  $("designWidthWrap").hidden = currentFormat !== "video";
+  const notes = [["", `<b>${f.label}</b>. The slides are rendered at ${f.size[0]}&times;${f.size[1]},
+    so they fill the whole frame with no bars, ready to upload.`]];
+  if (currentFormat !== "video" && deckText && !deckFromAI)
+    notes.push(["warn", `This deck was most likely designed for a wide screen. It will only fill
+      a ${currentFormat} frame properly if its own layout adapts to the shape. Decks made with
+      <b>Write with AI</b> fit every format.`]);
+  $("formatNote").innerHTML = notes.map(([c, h]) =>
+    `<div class="status ${c}">${h}</div>`).join("");
+}
+
+/* Subtitles shown at panel width, so the sample is the real proportion. */
 function updateSubPreview() {
-  const scale = Math.min(1, ($("subPreview").clientWidth || 880) / 1920);
+  const frameWidth = (FORMATS[currentFormat] || {size: [1920]}).size[0];
+  const scale = Math.min(1, ($("subPreview").clientWidth || 880) / frameWidth);
   const size = (parseFloat($("font_size").value) || 54) * scale;
   const outline = (parseFloat($("outline").value) || 0) * scale;
   const preset = PRESETS[$("preset").value] || {text: "#ffffff", outline: "#000000"};
@@ -542,6 +611,7 @@ async function inspect() {
   $("inspect").innerHTML = notes.map(([c, h]) =>
     `<div class="status ${c}">${h}</div>`).join("");
   $("go").disabled = !ready;
+  updateFormatNote();
   saveSession();
 }
 
@@ -702,6 +772,7 @@ function collectOptions() {
     music_db: num("music_db"),
     chunk: $("chunk").value,
     design_width: num("design_width"),
+    format: currentFormat,
     text_colour: PRESETS[$("preset").value].text,
     outline_colour: PRESETS[$("preset").value].outline,
     outline: PRESETS[$("preset").value].width === undefined
@@ -720,7 +791,9 @@ function preflight() {
   const o = collectOptions();
   const sentences = (report.sentences || []).reduce((a, b) => a + b, 0);
   const supplied = Object.keys(assetFiles).length;
+  const f = FORMATS[currentFormat];
   const rows = [
+    ["Format", `${currentFormat} &mdash; ${f.size[0]}&times;${f.size[1]}`],
     ["Deck", `${deckName} &mdash; ${report.slides} slides`],
     ["Script", `${scriptName} &mdash; ${sentences} sentences to speak`],
     ["Screenshots", missing.length
@@ -1173,11 +1246,13 @@ function applyOptions(o) {
   if (o.highlight !== undefined) $("highlight").value = o.highlight ? "1" : "0";
   if (o.highlight_colour) $("highlight_colour").value = o.highlight_colour;
   if (o.chunk) $("chunk").value = o.chunk;
+  if (o.format) setFormat(o.format, false);
 }
 
 async function boot() {
   refreshKokoro();          // not awaited: it can resolve while the session loads
   await voicesReady;
+  await formatsReady;
   const s = await fetch("/session").then(r => r.json()).catch(() => ({}));
   restoring = true;
   if (s && s.options) applyOptions(s.options);

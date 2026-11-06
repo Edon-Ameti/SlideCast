@@ -21,6 +21,28 @@ from urllib import request as urlrequest
 
 KOKORO_URL = "http://localhost:7860/tts/convert"
 SAMPLE_RATE = 24000
+
+# The shapes a video can be made in. Slides are rendered at the shape itself,
+# so each fills its frame with no bars. The subtitle defaults suit the frame:
+# a Short is narrow, and its bottom is covered by the app's own buttons and
+# caption, so its subtitles sit higher.
+FORMATS = {
+    "video":    {"size": (1920, 1080), "font_size": 54, "max_chars": 56, "margin_v": 20,
+                 "label": "Regular video: YouTube, websites, presentations"},
+    "short":    {"size": (1080, 1920), "font_size": 62, "max_chars": 26, "margin_v": 380,
+                 "label": "Vertical: YouTube Shorts, TikTok, Instagram Reels"},
+    "square":   {"size": (1080, 1080), "font_size": 50, "max_chars": 34, "margin_v": 40,
+                 "label": "Square: Instagram and LinkedIn feed posts"},
+    "portrait": {"size": (1080, 1350), "font_size": 52, "max_chars": 32, "margin_v": 60,
+                 "label": "Tall feed post: Instagram, Facebook"},
+}
+# Non-video formats are laid out against a CSS width of 540 and rendered at 2x.
+# A wide deck keeps its own design width setting.
+NARROW_DESIGN_WIDTH = 540
+
+
+def frame_size(opts):
+    return FORMATS[getattr(opts, "format", "video") or "video"]["size"]
 CHROME_CANDIDATES = [
     r"C:\Program Files\Google\Chrome\Application\chrome.exe",
     r"C:\Program Files (x86)\Google\Chrome\Application\chrome.exe",
@@ -433,8 +455,13 @@ def count_slides(html):
     return len(re.findall(r'<section[^>]*class="[^"]*\bslide\b', html))
 
 
-def render_slides(html_path, assets, outdir, chrome, log, design_width=1536):
-    """One 1920x1080 PNG per slide. Returns the list of paths."""
+def render_slides(html_path, assets, outdir, chrome, log, design_width=1536,
+                  size=(1920, 1080)):
+    """One PNG per slide at the frame size. Returns the list of paths."""
+    width, height = size
+    if width <= height:
+        design_width = NARROW_DESIGN_WIDTH
+    viewport = (design_width, round(design_width * height / width))
     source = Path(html_path)
     html = absolutize(source.read_text(encoding="utf-8"), source.parent, assets)
     total = count_slides(html)
@@ -470,8 +497,8 @@ def render_slides(html_path, assets, outdir, chrome, log, design_width=1536):
         # designed by eye there renders smaller if captured at 1920. Render at
         # the width it was designed for and scale up to 1080p.
         subprocess.run([chrome, "--headless=new", "--disable-gpu", "--hide-scrollbars",
-                        f"--force-device-scale-factor={1920 / design_width:.6f}",
-                        f"--window-size={design_width},{round(design_width * 9 / 16)}",
+                        f"--force-device-scale-factor={width / design_width:.6f}",
+                        f"--window-size={viewport[0]},{viewport[1]}",
                         f"--user-data-dir={profile}",
                         f"--screenshot={png}", page.resolve().as_uri() + "#1"],
                        check=True, capture_output=True)
@@ -640,13 +667,14 @@ def dialogue_lines(events, opts):
 
 
 def write_ass(path, events, opts):
-    """PlayRes is the real frame size, so Fontsize is genuine pixels at 1080p."""
+    """PlayRes is the real frame size, so Fontsize is genuine pixels."""
     bold = -1 if opts.bold else 0
+    width, height = frame_size(opts)
     header = (
         "[Script Info]\n"
         "ScriptType: v4.00+\n"
-        "PlayResX: 1920\n"
-        "PlayResY: 1080\n"
+        f"PlayResX: {width}\n"
+        f"PlayResY: {height}\n"
         "WrapStyle: 2\n"
         "ScaledBorderAndShadow: yes\n"
         "\n"
@@ -660,7 +688,7 @@ def write_ass(path, events, opts):
         f"&H000000FF,"
         f"{ass_style_colour(getattr(opts, 'outline_colour', '#000000'))},"
         f"&H00000000,{bold},0,0,0,100,100,0,0,1,{opts.outline},0,2,"
-        f"80,80,{opts.margin_v},1\n"
+        f"{60 if width < 1920 else 80},{60 if width < 1920 else 80},{opts.margin_v},1\n"
         "\n"
         "[Events]\n"
         # MarginV belongs in this list. Leaving it out shifts every field and
@@ -693,12 +721,16 @@ def build_filtergraph(durations, opts):
     fade=t=out leaves everything after it black.
     """
     fade = opts.fade
+    width, height = frame_size(opts)
     chains = []
     for index, duration in enumerate(durations):
         out = max(duration - fade, 0.0)
         fades = ("" if opts.no_fades else
                  f",fade=t=in:st=0:d={fade},fade=t=out:st={out:.3f}:d={fade}")
-        chains.append(f"[{index}:v]fps={opts.fps},setsar=1{fades}[v{index}]")
+        # The scale only guards against Chrome rounding the PNG a pixel off,
+        # which concat would refuse.
+        chains.append(f"[{index}:v]scale={width}:{height},fps={opts.fps},setsar=1"
+                      f"{fades}[v{index}]")
     labels = "".join(f"[v{i}]" for i in range(len(durations)))
     chains.append(f"{labels}concat=n={len(durations)}:v=1:a=0[vc]")
     last = "vc"
@@ -767,7 +799,7 @@ def run(opts, log=print, audio=None):
     log("rendering slides")
     pngs = render_slides(opts.deck, assets, build / "slides",
                          opts.chrome or find_chrome(), log,
-                         getattr(opts, "design_width", 1536))
+                         getattr(opts, "design_width", 1536), frame_size(opts))
     if len(pngs) != len(slides):
         raise RuntimeError(
             f"deck has {len(pngs)} slides but the script has {len(slides)}")
@@ -811,6 +843,8 @@ def run(opts, log=print, audio=None):
     assemble(build, pngs, durations, total, opts, log)
     log(f"done: {opts.out}")
     return {"duration": total, "slides": len(pngs), "subtitles": len(events),
+            "format": getattr(opts, "format", "video") or "video",
+            "size": list(frame_size(opts)), "margin_v": opts.margin_v,
             "slide_durations": durations, "out": str(Path(opts.out).resolve()),
             "pngs": [str(p) for p in pngs],
             "voice_clips": clips,
@@ -837,10 +871,14 @@ def build_parser():
     p.add_argument("--fade", type=float, default=0.45)
     p.add_argument("--fps", type=int, default=30)
     p.add_argument("--font", default="Arial")
-    p.add_argument("--font-size", type=int, default=54, dest="font_size")
+    p.add_argument("--format", choices=tuple(FORMATS), default="video",
+                   help="; ".join(f"{name}: {f['size'][0]}x{f['size'][1]}, {f['label']}"
+                                  for name, f in FORMATS.items()))
+    # These three default to whatever suits the chosen format.
+    p.add_argument("--font-size", type=int, dest="font_size")
     p.add_argument("--outline", type=int, default=4)
-    p.add_argument("--margin-v", type=int, default=20, dest="margin_v")
-    p.add_argument("--max-chars", type=int, default=56, dest="max_chars")
+    p.add_argument("--margin-v", type=int, dest="margin_v")
+    p.add_argument("--max-chars", type=int, dest="max_chars")
     p.add_argument("--min-sub", type=float, default=0.9, dest="min_sub",
                    help="shortest time a subtitle line may stay on screen")
     p.add_argument("--bold", action="store_true", help="CapCut subtitles are not bold, so this is off by default")
@@ -872,6 +910,9 @@ def build_parser():
 def main():
     parser = build_parser()
     opts = parser.parse_args()
+    for key in ("font_size", "max_chars", "margin_v"):
+        if getattr(opts, key) is None:
+            setattr(opts, key, FORMATS[opts.format][key])
     if opts.highlight:
         opts.align_words = True
     if opts.gap_slide < 2 * opts.fade:

@@ -149,6 +149,7 @@ def job(payload):
             whisper=o.get("whisper", "base"),
             chunk=o.get("chunk", "slide"),
             design_width=int(o.get("design_width", 1536)),
+            format=o.get("format", "video") if o.get("format") in d.FORMATS else "video",
             no_subs=bool(o.get("no_subs", False)),
             no_fades=not bool(o.get("with_fades", True)),
             music=(str(next(iter(sorted(MUSIC.glob("*"))))) 
@@ -330,6 +331,8 @@ class Handler(BaseHTTPRequestHandler):
             return self.send_file(asset, "image/svg+xml")
         if route == "/voices":
             return self.send(200, json.dumps({"voices": VOICES}))
+        if route == "/formats":
+            return self.send(200, json.dumps(d.FORMATS))
         if route == "/status":
             return self.send(200, json.dumps(JOB))
         if route == "/kokoro":
@@ -456,6 +459,8 @@ class Handler(BaseHTTPRequestHandler):
                     music=str(track) if (track := current_music()) else None,
                     music_duration=media_seconds(track) if track else 0.0,
                     music_volume=d.gain(float(payload.get("music_db", -20.0))),
+                    size=tuple(r.get("size", (1920, 1080))),
+                    margin_v=r.get("margin_v", 20),
                     log=lambda m: None)
                 return self.send(200, json.dumps({"ok": True, **out}))
             except Exception as exc:
