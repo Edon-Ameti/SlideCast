@@ -8,6 +8,7 @@ itself, so it carries real capitalisation and punctuation.
 
 import argparse
 import array
+import hashlib
 import io
 import json
 import math
@@ -227,15 +228,45 @@ def silence(seconds):
     return b"\x00\x00" * int(SAMPLE_RATE * seconds)
 
 
-def build_audio(slides, opts, log):
+def voice_piece_key(text, voice, speed):
+    """Only what changes the sound of one piece. Pauses are added around the
+    pieces afterwards, so changing a gap never re-records anything."""
+    parts = [text, voice, f"{float(speed):.6f}"]
+    return hashlib.sha1(json.dumps(parts).encode("utf-8")).hexdigest()
+
+
+def speak_piece(text, opts, cache_dir, used_keys):
+    """Kokoro's audio for one piece, trimmed, from the cache when it is there."""
+    key = voice_piece_key(text, opts.voice, opts.speed)
+    used_keys.add(key)
+    cached = cache_dir / f"{key}.wav" if cache_dir else None
+    if cached and cached.exists():
+        with wave.open(str(cached), "rb") as w:
+            return w.readframes(w.getnframes()), True
+    frames, rate = decode_wav(synthesize(text, opts.voice, opts.speed, opts.kokoro))
+    if rate != SAMPLE_RATE:
+        raise RuntimeError(f"Kokoro returned {rate} Hz, expected {SAMPLE_RATE}")
+    frames = trim_silence(frames, rate)
+    if cached:
+        cache_dir.mkdir(parents=True, exist_ok=True)
+        write_wav(cached, frames)
+    return frames, False
+
+
+def build_audio(slides, opts, log, cache_dir=None):
     """Speak the script. Returns frames, cues, slide end times, total.
 
     A whole slide per call lets Kokoro carry phrasing across sentences, which is
     how it sounds when you paste a paragraph into its own UI. Sentence by
     sentence gives exact sentence boundaries with no alignment, at the cost of
     every sentence starting cold.
+
+    With a cache_dir every piece is kept, so editing one slide re-records that
+    slide only. Pieces this build did not use are deleted afterwards.
     """
     per_slide = getattr(opts, "chunk", "slide") == "slide"
+    cache_dir = Path(cache_dir) if cache_dir else None
+    used_keys = set()
     track = bytearray()
     cues, slide_ends = [], []
     track += silence(opts.lead_in)
@@ -244,13 +275,10 @@ def build_audio(slides, opts, log):
                  else split_sentences(slide["paragraph"]))
         for position, unit in enumerate(units):
             where = f"  slide {index + 1}/{len(slides)}"
-            log(where if per_slide
-                else f"{where}, sentence {position + 1}/{len(units)}")
-            frames, rate = decode_wav(
-                synthesize(unit, opts.voice, opts.speed, opts.kokoro))
-            if rate != SAMPLE_RATE:
-                raise RuntimeError(f"Kokoro returned {rate} Hz, expected {SAMPLE_RATE}")
-            frames = trim_silence(frames, rate)
+            if not per_slide:
+                where += f", sentence {position + 1}/{len(units)}"
+            frames, from_cache = speak_piece(unit, opts, cache_dir, used_keys)
+            log(where + (" (unchanged, reused)" if from_cache else ""))
             start = len(track) / 2 / SAMPLE_RATE
             track += frames
             end = len(track) / 2 / SAMPLE_RATE
@@ -261,6 +289,10 @@ def build_audio(slides, opts, log):
         if index < len(slides) - 1:
             track += silence(opts.gap_slide)
     track += silence(opts.tail)
+    if cache_dir and cache_dir.exists():
+        for old in cache_dir.glob("*.wav"):
+            if old.stem not in used_keys:
+                old.unlink()
     return bytes(track), cues, slide_ends, len(track) / 2 / SAMPLE_RATE
 
 
@@ -695,7 +727,7 @@ def run(opts, log=print, audio=None):
 
     if audio is None:
         log("generating speech")
-        audio = build_audio(slides, opts, log)
+        audio = build_audio(slides, opts, log, build / "voice_cache")
     else:
         log("reusing the voice already generated")
     frames, cues, slide_ends, total = audio

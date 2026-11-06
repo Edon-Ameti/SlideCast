@@ -31,6 +31,8 @@ RESULT = WORK / "result.json"
 # The voice is the slow part of a build. Generating it once lets the music
 # preview and the build that follows reuse it instead of synthesizing twice.
 CACHE = WORK / "voice_cache"
+# One recording per slide (or sentence), so an edit re-records only what changed.
+PIECES = CACHE / "pieces"
 MUSIC = WORK / "music"
 # Beds shipped with SlideCast, plus anything you drop in beside them.
 LIBRARY = HERE / "music_library"
@@ -167,7 +169,7 @@ def job(payload):
             log("using the voice already generated, no need to synthesize again")
         else:
             log("generating speech")
-            audio = d.build_audio(d.parse_script(opts.script), opts, log)
+            audio = d.build_audio(d.parse_script(opts.script), opts, log, PIECES)
             store_voice(key, audio)
         result = d.run(opts, log, audio=audio)
         JOB["result"] = result
@@ -208,7 +210,7 @@ def voice_job(payload):
         log(f"{len(slides)} slides, {sentences} sentences" +
             (f", sent to Kokoro {len(slides)} slides at a time"
              if opts.chunk == "slide" else ", sent one sentence at a time"))
-        audio = d.build_audio(slides, opts, log)
+        audio = d.build_audio(slides, opts, log, PIECES)
         store_voice(key, audio)
         JOB["result"] = {"cached": False, "total": audio[3]}
         log(f"voice ready: {audio[3]:.1f}s")
