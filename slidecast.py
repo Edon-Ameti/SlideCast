@@ -66,7 +66,24 @@ CHROME_ON_PATH = ["chrome", "google-chrome", "google-chrome-stable",
 
 MARKUP = re.compile(r"\[([^\]]+)\]\((?:/[^)]*/|[+-]\d)\)")
 SLIDE_HDR = re.compile(r"^Slide\s+(\d+)\s*(?:-\s*(.*))?$", re.I)
-SENT_SPLIT = re.compile(r"(?<=[.!?\u2026])\s+")
+# \u0964 is the danda, the full stop of Hindi.
+SENT_SPLIT = re.compile(r"(?<=[.!?\u2026\u0964])\s+")
+
+# The languages Kokoro speaks that put spaces between words, which the
+# subtitle line-breaking depends on. A voice's first letter is its language.
+LANGUAGES = {
+    "a": {"name": "English (American)", "whisper": "en"},
+    "b": {"name": "English (British)", "whisper": "en"},
+    "e": {"name": "Spanish", "whisper": "es"},
+    "f": {"name": "French", "whisper": "fr"},
+    "i": {"name": "Italian", "whisper": "it"},
+    "p": {"name": "Portuguese (Brazil)", "whisper": "pt"},
+    "h": {"name": "Hindi", "whisper": "hi"},
+}
+
+
+def language_of(voice):
+    return LANGUAGES.get(voice[:1], LANGUAGES["a"])
 
 
 def strip_markup(text):
@@ -757,6 +774,19 @@ def slide_durations(slide_ends, total, gap_slide):
     return durations
 
 
+def with_subtitle_text(cues, slides):
+    """Swap each spoken sentence's text for the matching sentence of another
+    script, so a translated voice can carry subtitles in the original language.
+    The translation keeps one sentence for one sentence, and the voice is
+    recorded a sentence at a time, so each window is exact."""
+    texts = [sentence for slide in slides for sentence in split_sentences(slide["paragraph"])]
+    if len(texts) != len(cues):
+        raise RuntimeError(
+            f"the subtitle script has {len(texts)} sentences but the voice has {len(cues)}; "
+            "translate the script again")
+    return [(start, end, strip_markup(text)) for (start, end, _), text in zip(cues, texts)]
+
+
 def sentence_starts_per_slide(cues, ranges):
     """When each sentence starts, grouped by the slide it is spoken on."""
     starts = [[] for _ in ranges]
@@ -910,6 +940,13 @@ def run(opts, log=print, audio=None):
 
     slides = parse_script(opts.script)
     log(f"script: {len(slides)} slides")
+    # A translated voice with subtitles in the original language: the voice
+    # speaks one script, the subtitles and chapters come from the other.
+    voice_slides = (parse_script(opts.voice_script)
+                    if getattr(opts, "voice_script", None) else slides)
+    if len(voice_slides) != len(slides):
+        raise RuntimeError(f"the voice script has {len(voice_slides)} slides but the "
+                           f"subtitle script has {len(slides)}")
 
     # Check before rendering. Otherwise the failure lands minutes later, after
     # every slide is done, as a bare socket error.
@@ -930,15 +967,17 @@ def run(opts, log=print, audio=None):
 
     if audio is None:
         log("generating speech")
-        audio = build_audio(slides, opts, log, build / "voice_cache")
+        audio = build_audio(voice_slides, opts, log, build / "voice_cache")
     else:
         log("reusing the voice already generated")
     frames, cues, slide_ends, total = audio
     write_wav(build / "audio.wav", frames)
     log(f"audio: {total:.1f}s")
+    if voice_slides is not slides:
+        cues = with_subtitle_text(cues, slides)
 
     word_times = None
-    if getattr(opts, "align_words", False):
+    if getattr(opts, "align_words", False) and voice_slides is slides:
         import align
         units = [text for _, _, text in cues]
         key = align.cache_key(units, total)
@@ -946,7 +985,8 @@ def run(opts, log=print, audio=None):
         if word_times is None:
             log("aligning words to the audio")
             word_times = align.word_times(
-                build / "audio.wav", units, getattr(opts, "whisper", "base"), log)
+                build / "audio.wav", units, getattr(opts, "whisper", "base"), log,
+                language_of(opts.voice)["whisper"])
             if word_times:
                 align.save(build, word_times, key)
         else:
@@ -1000,6 +1040,9 @@ def build_parser():
     p.add_argument("--assets", help="JSON map of {relative src: absolute path}")
     p.add_argument("--voice", default="af_sky")
     p.add_argument("--speed", type=float, default=1.0)
+    p.add_argument("--voice-script", dest="voice_script",
+                   help="a translation of the script for the voice to speak, one sentence "
+                        "for each sentence; the subtitles stay in the main script's language")
     p.add_argument("--kokoro", default=KOKORO_URL)
     p.add_argument("--pronunciations", default=str(PRONUNCIATIONS),
                    help="JSON of {word: sound}; matching words get Kokoro markup "
@@ -1055,6 +1098,11 @@ def finish_options(opts):
             setattr(opts, key, FORMATS[opts.format][key])
     if opts.highlight:
         opts.align_words = True
+    if getattr(opts, "voice_script", None):
+        # Subtitles in another language than the voice: each sentence is
+        # recorded on its own for exact timing, and no word can be highlighted.
+        opts.chunk = "sentence"
+        opts.align_words = opts.highlight = False
     if opts.gap_slide < 2 * opts.fade:
         raise ValueError(f"--gap-slide must be at least twice --fade "
                          f"({2 * opts.fade}) or the fade would cover speech")

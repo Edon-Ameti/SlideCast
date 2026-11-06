@@ -40,6 +40,14 @@ MUSIC = WORK / "music"
 LIBRARY = HERE / "music_library"
 
 
+def chunk_for(payload):
+    """Subtitles in another language than the voice need each sentence
+    recorded on its own, whatever the Voice panel says."""
+    if payload.get("voice_script") and payload.get("subtitles") == "original":
+        return "sentence"
+    return payload.get("options", {}).get("chunk", "slide")
+
+
 def voice_key(payload):
     """Anything that changes the speech changes the key.
 
@@ -52,8 +60,10 @@ def voice_key(payload):
         except (TypeError, ValueError):
             return str(value)
 
-    o = payload.get("options", {})
-    parts = [payload.get("script", "")] + [token(o.get(k)) for k in
+    o = {**payload.get("options", {}), "chunk": chunk_for(payload)}
+    # A translated voice speaks the translation, not the script on screen.
+    spoken = payload.get("voice_script") or payload.get("script", "")
+    parts = [spoken] + [token(o.get(k)) for k in
              ("voice", "speed", "lead_in", "tail", "gap_sentence", "gap_slide",
               "chunk")] + [d.load_pronunciations()]
     return hashlib.sha1(json.dumps(parts).encode("utf-8")).hexdigest()
@@ -84,7 +94,13 @@ VOICES = ["af_sky", "af_heart", "af_bella", "af_nicole", "af_sarah", "af_nova",
           "af_aoede", "af_kore", "af_jessica", "af_river", "af_alloy",
           "am_adam", "am_michael", "am_echo", "am_eric", "am_liam", "am_onyx",
           "am_puck", "am_fenrir", "am_santa", "am_every",
-          "bf_emma", "bf_isabella", "bf_alice", "bf_lily"]
+          "bf_emma", "bf_isabella", "bf_alice", "bf_lily",
+          "bm_george", "bm_lewis", "bm_daniel", "bm_fable",
+          "ef_dora", "em_alex", "em_santa",
+          "ff_siwis",
+          "if_sara", "im_nicola",
+          "pf_dora", "pm_alex", "pm_santa",
+          "hf_alpha", "hf_beta", "hm_omega", "hm_psi"]
 
 JOB = {"running": False, "kind": None, "log": [], "error": None, "result": None}
 
@@ -99,10 +115,12 @@ def log(message):
 
 def write_inputs(payload):
     WORK.mkdir(exist_ok=True)
-    for stale in ("video-presentation.html", "voiceover.txt"):
+    for stale in ("video-presentation.html", "voiceover.txt", "voiceover-voice.txt"):
         (WORK / stale).unlink(missing_ok=True)
     (WORK / "video-presentation.html").write_text(payload["deck"], encoding="utf-8")
     (WORK / "voiceover.txt").write_text(payload["script"], encoding="utf-8")
+    if payload.get("voice_script"):
+        (WORK / "voiceover-voice.txt").write_text(payload["voice_script"], encoding="utf-8")
     assets_dir = WORK / "assets"
     assets_dir.mkdir(exist_ok=True)
     mapping = {}
@@ -120,9 +138,15 @@ def job(payload):
         assets_file = WORK / "assets.json"
         assets_file.write_text(json.dumps(mapping), encoding="utf-8")
         o = payload.get("options", {})
+        # With a translation, the voice speaks it. The subtitles follow it too,
+        # unless they were asked to stay in the original language.
+        translated = bool(payload.get("voice_script"))
+        original_subs = translated and payload.get("subtitles") == "original"
+        on_screen = "voiceover.txt" if not translated or original_subs else "voiceover-voice.txt"
         opts = Namespace(
             deck=str(WORK / "video-presentation.html"),
-            script=str(WORK / "voiceover.txt"),
+            script=str(WORK / on_screen),
+            voice_script=str(WORK / "voiceover-voice.txt") if original_subs else None,
             out=str(WORK / "video.mp4"),
             build=str(WORK / "build"),
             assets=str(assets_file),
@@ -149,7 +173,7 @@ def job(payload):
             highlight=bool(o.get("highlight", False)),
             highlight_colour=o.get("highlight_colour", "#FFD400"),
             whisper=o.get("whisper", "base"),
-            chunk=o.get("chunk", "slide"),
+            chunk=chunk_for(payload),
             design_width=int(o.get("design_width", 1536)),
             format=o.get("format", "video") if o.get("format") in d.FORMATS else "video",
             no_subs=bool(o.get("no_subs", False)),
@@ -160,6 +184,9 @@ def job(payload):
             chrome=None,
             ffmpeg=o.get("ffmpeg", "ffmpeg"),
         )
+        if original_subs:
+            # No word can be highlighted across two languages.
+            opts.align_words = opts.highlight = False
         if opts.gap_slide < 2 * opts.fade:
             raise RuntimeError("Slide gap must be at least twice the fade length, "
                                "or the fade would cover speech.")
@@ -173,7 +200,8 @@ def job(payload):
             log("using the voice already generated, no need to synthesize again")
         else:
             log("generating speech")
-            audio = d.build_audio(d.parse_script(opts.script), opts, log, PIECES)
+            audio = d.build_audio(d.parse_script(opts.voice_script or opts.script),
+                                  opts, log, PIECES)
             store_voice(key, audio)
         result = d.run(opts, log, audio=audio)
         JOB["result"] = result
@@ -191,7 +219,8 @@ def voice_job(payload):
     """Generate only the speech, so the music can be judged against it."""
     try:
         WORK.mkdir(exist_ok=True)
-        (WORK / "voiceover.txt").write_text(payload["script"], encoding="utf-8")
+        (WORK / "voiceover.txt").write_text(payload.get("voice_script") or payload["script"],
+                                            encoding="utf-8")
         o = payload.get("options", {})
         opts = Namespace(
             script=str(WORK / "voiceover.txt"),
@@ -201,7 +230,7 @@ def voice_job(payload):
             lead_in=float(o.get("lead_in", 0.6)), tail=float(o.get("tail", 1.2)),
             gap_sentence=float(o.get("gap_sentence", 0.28)),
             gap_slide=float(o.get("gap_slide", 1.1)),
-            chunk=o.get("chunk", "slide"))
+            chunk=chunk_for(payload))
         key = voice_key(payload)
         if cached_voice(key):
             log("that voice is already generated")
@@ -332,7 +361,7 @@ class Handler(BaseHTTPRequestHandler):
             asset = HERE / Path(route).name
             return self.send_file(asset, "image/svg+xml")
         if route == "/voices":
-            return self.send(200, json.dumps({"voices": VOICES}))
+            return self.send(200, json.dumps({"voices": VOICES, "languages": d.LANGUAGES}))
         if route == "/formats":
             return self.send(200, json.dumps(d.FORMATS))
         if route == "/ai/providers":
@@ -443,6 +472,42 @@ class Handler(BaseHTTPRequestHandler):
                 deck = ai.write_deck(payload.get("ai", {}), topic, count,
                                      payload.get("format", "video"))
                 return self.send(200, json.dumps({"ok": True, "deck": deck}))
+            except ai.AIError as exc:
+                return self.send(200, json.dumps({"ok": False, "error": str(exc)}))
+
+        if route == "/ai/translate":
+            # The script always; the slides too when asked. An AI deck is
+            # translated as its data and drawn again, a hand-made deck has its
+            # visible text swapped and everything else left alone.
+            try:
+                target = d.LANGUAGES.get(payload.get("target", ""))
+                if not target:
+                    raise ai.AIError("Choose the language to translate into.")
+                settings = payload.get("ai", {})
+                WORK.mkdir(exist_ok=True)
+                probe = WORK / "_translate.txt"
+                probe.write_text(payload.get("script", ""), encoding="utf-8")
+                original = d.parse_script(probe)
+                if not original:
+                    raise ai.AIError("Load the voiceover script first.")
+                request = [{"label": s["label"],
+                            "sentences": [d.strip_markup(x)
+                                          for x in d.split_sentences(s["paragraph"])]}
+                           for s in original]
+                done = ai.translate_script(settings, request, target["name"],
+                                           lambda text: len(d.split_sentences(text)))
+                result = {"ok": True, "script": ai.translated_script(original, done),
+                          "deck": None}
+                if payload.get("slides"):
+                    if payload.get("ai_deck"):
+                        result["deck"] = deck_template.render_deck(
+                            ai.translate_deck(settings, payload["ai_deck"], target["name"]),
+                            target["whisper"])
+                    else:
+                        result["deck"] = deck_template.translate_html(
+                            payload.get("deck", ""),
+                            lambda texts: ai.translate_texts(settings, texts, target["name"]))
+                return self.send(200, json.dumps(result, ensure_ascii=False))
             except ai.AIError as exc:
                 return self.send(200, json.dumps({"ok": False, "error": str(exc)}))
 

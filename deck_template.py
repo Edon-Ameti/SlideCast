@@ -8,7 +8,8 @@ post without bars. It keeps the 'let currentSlide = 0;' line the renderer
 switches slides with, and bullets carry data-step so they appear as spoken.
 """
 
-from html import escape
+import re
+from html import escape, unescape
 
 STYLE = """
 :root{--u:min(1vw,1vh);--bg:#0b0d14;--text:#f2f4f8;--muted:#a3abbd;--accent:#ff7a1a}
@@ -88,3 +89,39 @@ def render_script(deck):
         lines += [f"Slide {number}" + (f" - {label}" if label else ""), "",
                   " ".join(str(slide["narration"]).split()), ""]
     return "\n".join(lines)
+
+
+# --------------------------------------------------------------------------
+# translating a deck someone made by hand
+# --------------------------------------------------------------------------
+
+# Tags (and comments) at the odd positions of a split, text at the even ones.
+TAG_SPLIT = re.compile(r"(<!--.*?-->|<[^>]+>)", re.S)
+HIDDEN = re.compile(r"<\s*(/?)\s*(script|style|title)\b", re.I)
+
+
+def visible_texts(html):
+    """The HTML split into pieces, and which pieces are text a viewer sees."""
+    parts, inside, where = TAG_SPLIT.split(html), None, []
+    for index, part in enumerate(parts):
+        if index % 2:
+            tag = HIDDEN.match(part)
+            if tag:
+                inside = None if tag.group(1) else tag.group(2).lower()
+        elif not inside and part.strip():
+            where.append(index)
+    return parts, where
+
+
+def translate_html(html, translate):
+    """Swap every piece of visible text for its translation. Tags, styles,
+    scripts and the spacing around each piece stay exactly as they were.
+    translate takes a list of strings and returns the same number back."""
+    parts, where = visible_texts(html)
+    texts = [" ".join(unescape(parts[i]).split()) for i in where]
+    for index, text in zip(where, translate(texts)):
+        piece = parts[index]
+        lead = piece[:len(piece) - len(piece.lstrip())]
+        trail = piece[len(piece.rstrip()):]
+        parts[index] = lead + escape(text, quote=False) + trail
+    return "".join(parts)

@@ -14,7 +14,8 @@ import re
 from pathlib import Path
 
 _model = None
-WORD = re.compile(r"[^a-z0-9']")
+# Letters of any language, so a translated voice aligns too.
+WORD = re.compile(r"[^\w']")
 
 
 def load(size="base"):
@@ -25,11 +26,11 @@ def load(size="base"):
     return _model
 
 
-def heard(wav, size="base", log=print):
+def heard(wav, size="base", log=print, language="en"):
     """Every word faster-whisper thinks it hears, with its timing."""
     log("  listening back to the voice")
     segments, _ = load(size).transcribe(
-        str(wav), word_timestamps=True, language="en",
+        str(wav), word_timestamps=True, language=language,
         vad_filter=False, beam_size=1, condition_on_previous_text=False)
     words = []
     for segment in segments:
@@ -83,10 +84,10 @@ def align(known, listened):
     return times
 
 
-def word_times(wav, sentences, size="base", log=print):
+def word_times(wav, sentences, size="base", log=print, language="en"):
     """[[(word, start, end), ...], ...] one list per sentence, or None if it fails."""
     try:
-        listened = heard(wav, size, log)
+        listened = heard(wav, size, log, language)
     except Exception as exc:
         log(f"  alignment unavailable ({exc})")
         return None

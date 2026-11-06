@@ -209,6 +209,27 @@
 
   <div class="panel">
     <h2>3 &middot; Voice</h2>
+    <div class="grid g3" style="margin-bottom:6px">
+      <div><label>Translate the narration into</label>
+        <select id="translateTo"><option value="">Don't translate</option></select></div>
+      <div id="subsLangWrap" hidden><label>Subtitles</label>
+        <select id="subsLang">
+          <option value="translated" selected>In the new language</option>
+          <option value="original">In the original language</option>
+        </select></div>
+      <div id="slidesLangWrap" hidden><label>Slides</label>
+        <select id="slidesLang">
+          <option value="translated" selected>Translated</option>
+          <option value="original">Keep the original</option>
+        </select></div>
+    </div>
+    <div class="row" id="translateRow" hidden style="margin:8px 0 4px">
+      <button class="mini" id="translateGo" style="padding:9px 16px">Translate</button>
+    </div>
+    <div id="translateStatus"></div>
+    <p class="hint" style="margin-bottom:14px">Translating uses the AI service and key from
+       <b>Write with AI</b>. Pick what changes language: the voice always does; the subtitles
+       and the slides can stay in the original.</p>
     <div class="grid g3">
       <div><label>Kokoro voice</label><select id="voice"></select></div>
       <div><label>Speed</label><input type="number" id="speed" value="1.0" step="0.05" min="0.5" max="2"></div>
@@ -489,10 +510,25 @@ let restoring = false, saveTimer = null, kokoroOK = false, buildRunning = false;
 // The most recent build, and whether it has been downloaded.
 let lastResult = null;
 
+let ALL_VOICES = [], LANGUAGES = {};
 const voicesReady = fetch("/voices").then(r => r.json()).then(d => {
-  $("voice").innerHTML = d.voices.map(v =>
-    `<option${v === "af_sky" ? " selected" : ""}>${v}</option>`).join("");
+  ALL_VOICES = d.voices;
+  LANGUAGES = d.languages || {};
+  $("translateTo").insertAdjacentHTML("beforeend", Object.entries(LANGUAGES).map(([k, l]) =>
+    `<option value="${k}">${l.name}</option>`).join(""));
+  fillVoices();
 });
+
+/* A translation is spoken by a voice of that language, so only those are offered. */
+function fillVoices() {
+  const lang = $("translateTo").value, current = $("voice").value || "af_sky";
+  const voices = lang ? ALL_VOICES.filter(v => v[0] === lang) : ALL_VOICES;
+  const pick = voices.includes(current) ? current : voices[0];
+  $("voice").innerHTML = voices.map(v => {
+    const name = (LANGUAGES[v[0]] || {}).name || "";
+    return `<option value="${v}"${v === pick ? " selected" : ""}>${v} &mdash; ${name}</option>`;
+  }).join("");
+}
 
 /* Everything you picked is mirrored to the server, so a refresh - or a restart
    of the server - does not throw away your inputs or an unsaved build. */
@@ -502,7 +538,7 @@ function saveSession() {
   saveTimer = setTimeout(() => {
     fetch("/session", {method: "POST", body: JSON.stringify(
       {deckText, scriptText, deckName, scriptName, assetFiles, assetNames,
-       aiDeck, deckFromAI, aiTopic: $("aiTopic").value,
+       aiDeck, deckFromAI, aiTopic: $("aiTopic").value, translation,
        options: collectOptions()})}).catch(() => {});
   }, 400);
 }
@@ -673,6 +709,77 @@ $("aiUse").onclick = async () => {
   await inspect();
 };
 
+/* ---- translation: the voice, and optionally subtitles and slides ---- */
+let translation = null;   // {lang, slides, source, sourceDeck, script, deck}
+
+function translationWanted() {
+  return $("translateTo").value
+    ? {lang: $("translateTo").value, slides: $("slidesLang").value === "translated",
+       subtitles: $("subsLang").value}
+    : null;
+}
+
+/* A translation only counts for the inputs and choices it was made from. */
+function translationReady() {
+  const want = translationWanted();
+  return !!(want && translation && translation.lang === want.lang
+    && translation.slides === want.slides && translation.source === scriptText
+    && (!want.slides || translation.sourceDeck === deckText));
+}
+
+function updateTranslationUI() {
+  const want = translationWanted();
+  $("subsLangWrap").hidden = $("slidesLangWrap").hidden = $("translateRow").hidden = !want;
+  if (!want) { $("translateStatus").innerHTML = ""; return; }
+  const name = LANGUAGES[want.lang].name;
+  const notes = [];
+  if (translationReady())
+    notes.push(["ok", `Translated into <b>${name}</b>. The build uses it.`]);
+  else
+    notes.push(["warn", translation && translation.lang === want.lang
+      ? "The script, slides or choices changed since translating. Press Translate again."
+      : `Press <b>Translate</b> to translate into ${name} before building.`]);
+  if (want.subtitles === "original")
+    notes.push(["", `The voice will speak ${name} with subtitles in the original language. Each
+      sentence is recorded on its own so the subtitles line up, and the spoken word cannot be
+      highlighted.`]);
+  $("translateStatus").innerHTML = notes.map(([c, h]) =>
+    `<div class="status ${c}">${h}</div>`).join("");
+}
+
+$("translateTo").addEventListener("change", () => { fillVoices(); updateTranslationUI(); });
+$("subsLang").addEventListener("change", updateTranslationUI);
+$("slidesLang").addEventListener("change", updateTranslationUI);
+
+$("translateGo").onclick = async () => {
+  const want = translationWanted();
+  if (!scriptText) return aiNoteIn("translateStatus", "bad", "Load the voiceover script first.");
+  $("translateGo").disabled = true;
+  aiNoteIn("translateStatus", "warn", `Translating into ${LANGUAGES[want.lang].name}&hellip;`);
+  const r = await fetch("/ai/translate", {method: "POST", body: JSON.stringify(
+    {ai: aiSettings(), target: want.lang, script: scriptText, slides: want.slides,
+     deck: deckText, ai_deck: deckFromAI ? aiDeck : null})})
+    .then(x => x.json()).catch(() => ({ok: false, error: "SlideCast did not answer."}));
+  $("translateGo").disabled = false;
+  if (!r.ok) return aiNoteIn("translateStatus", "bad", escapeAttr(r.error));
+  translation = {lang: want.lang, slides: want.slides, source: scriptText,
+                 sourceDeck: deckText, script: r.script, deck: r.deck};
+  updateTranslationUI();
+  saveSession();
+};
+
+function aiNoteIn(id, cls, html) {
+  $(id).innerHTML = `<div class="status ${cls}">${html}</div>`;
+}
+
+/* What a build or a voice job sends on top of the inputs when translating. */
+function translationPayload() {
+  const want = translationWanted();
+  if (!want || !translationReady()) return {};
+  return {voice_script: translation.script, subtitles: want.subtitles,
+          ...(want.slides && translation.deck ? {deck: translation.deck} : {})};
+}
+
 /* Subtitles shown at panel width, so the sample is the real proportion. */
 function updateSubPreview() {
   const frameWidth = (FORMATS[currentFormat] || {size: [1920]}).size[0];
@@ -784,6 +891,7 @@ async function inspect() {
     `<div class="status ${c}">${h}</div>`).join("");
   $("go").disabled = !ready;
   updateFormatNote();
+  updateTranslationUI();
   saveSession();
 }
 
@@ -946,6 +1054,8 @@ function collectOptions() {
     design_width: num("design_width"),
     format: currentFormat,
     ai_provider: $("aiProvider").value, ai_model: $("aiModel").value, ai_base: $("aiBase").value,
+    translate_to: $("translateTo").value, subs_lang: $("subsLang").value,
+    slides_lang: $("slidesLang").value,
     text_colour: PRESETS[$("preset").value].text,
     outline_colour: PRESETS[$("preset").value].outline,
     outline: PRESETS[$("preset").value].width === undefined
@@ -972,6 +1082,9 @@ function preflight() {
     ["Screenshots", missing.length
         ? `${supplied} of ${missing.length} supplied` : "all resolved automatically"],
     ["Voice", `${o.voice} at ${o.speed}&times; speed`],
+    ...(translationWanted() ? [["Language", `${LANGUAGES[o.translate_to].name} voice, subtitles
+      ${o.subs_lang === "original" ? "in the original language" : "translated"}, slides
+      ${o.slides_lang === "original" ? "in the original language" : "translated"}`]] : []),
     ["Kokoro", kokoroOK ? "running and answering"
                         : "not answering &mdash; SlideCast will try to start it"],
     ["Subtitles", `${o.font} ${o.font_size}px, outline ${o.outline}, ${o.margin_v}px off the bottom`],
@@ -1000,6 +1113,11 @@ function preflight() {
 }
 
 $("go").onclick = () => {
+  if (translationWanted() && !translationReady()) {
+    updateTranslationUI();
+    $("translateStatus").scrollIntoView({block: "center", behavior: "smooth"});
+    return;
+  }
   if (lastResult && lastResult.duration && !lastResult.saved) {
     const t = lastResult.duration;
     $("unsavedDetail").innerHTML =
@@ -1034,7 +1152,8 @@ $("confirmGo").onclick = async () => {
   $("publish").hidden = true;
   await fetch("/build", {method: "POST",
     body: JSON.stringify({deck: deckText, script: scriptText,
-                          assets: assetFiles, options: collectOptions()})});
+                          assets: assetFiles, options: collectOptions(),
+                          ...translationPayload()})});
   poll();
 };
 
@@ -1227,7 +1346,7 @@ async function generateVoice(ui) {
   ui.note("warn", `Generating the voice with Kokoro. This takes a couple of minutes for a full
      script, but only once &mdash; the build afterwards reuses it.`);
   await fetch("/voice", {method: "POST", body: JSON.stringify(
-    {script: scriptText, options: collectOptions()})});
+    {script: scriptText, options: collectOptions(), ...translationPayload()})});
   const timer = setInterval(async () => {
     const s = await fetch("/status").then(r => r.json());
     const last = s.log[s.log.length - 1] || "";
@@ -1266,7 +1385,7 @@ $("genVoice").onclick = async () => {
      this takes a couple of minutes for a full script &mdash; but only once. The build afterwards
      reuses it.`);
   await fetch("/voice", {method: "POST", body: JSON.stringify(
-    {script: scriptText, options: collectOptions()})});
+    {script: scriptText, options: collectOptions(), ...translationPayload()})});
   const timer = setInterval(async () => {
     const s = await fetch("/status").then(r => r.json());
     const last = s.log[s.log.length - 1] || "";
@@ -1426,6 +1545,11 @@ function applyOptions(o) {
    "fps", "font", "font_size", "outline", "margin_v", "max_chars", "min_sub",
    "music_db", "highlight_colour", "chunk", "design_width"]
     .forEach(k => set(k, o[k]));
+  if (o.translate_to !== undefined && (o.translate_to === "" || LANGUAGES[o.translate_to]))
+    $("translateTo").value = o.translate_to;
+  if (o.subs_lang) $("subsLang").value = o.subs_lang;
+  if (o.slides_lang) $("slidesLang").value = o.slides_lang;
+  fillVoices();
   if (o.voice) $("voice").value = o.voice;
   if (o.bold !== undefined) $("bold").value = o.bold ? "1" : "0";
   if (o.preset && PRESETS[o.preset]) $("preset").value = o.preset;
@@ -1452,6 +1576,7 @@ async function boot() {
   if (s && s.aiTopic) $("aiTopic").value = s.aiTopic;
   if (s && s.aiDeck) { aiDeck = s.aiDeck; renderAiReview(); }
   deckFromAI = !!(s && s.deckFromAI);
+  translation = (s && s.translation) || null;
   if (s && s.deckText) {
     deckText = s.deckText; scriptText = s.scriptText || "";
     deckName = s.deckName || ""; scriptName = s.scriptName || "";
@@ -1461,6 +1586,7 @@ async function boot() {
     renderAssets();
   }
   restoring = false;
+  updateTranslationUI();
   updateFadeNote();
   updateHighlightNote();
   updateSubPreview();

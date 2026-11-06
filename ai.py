@@ -209,3 +209,96 @@ def write_deck(settings, topic, slide_count, fmt="video"):
               f"Topic or notes:\n{topic.strip()}")
     return ask_json(settings, DECK_SYSTEM, prompt,
                     lambda data: deck_problem(data, slide_count))
+
+
+# --------------------------------------------------------------------------
+# translating
+# --------------------------------------------------------------------------
+
+TRANSLATE_SYSTEM = """You translate narrated videos. Reply with JSON only, no other text.
+
+Translate every piece of text into {language}. Keep exactly the same structure,
+and the same number of items in every list. Each sentence stays one sentence:
+never split or merge sentences, and never put a full stop inside one. Keep the
+names of products, people and code as they are. Write numbers and symbols the
+way they should be spoken."""
+
+
+def _same_shape(data, original, key):
+    if not isinstance(data, dict) or not isinstance(data.get(key), list):
+        return f'it needs an object with a "{key}" list'
+    if len(data[key]) != len(original):
+        return f"it has {len(data[key])} {key} but the original has {len(original)}"
+    return None
+
+
+def translate_script(settings, slides, language, count_sentences):
+    """slides: [{"label", "sentences": [...]}]. Returns the same shape translated,
+    with one sentence for each sentence, so subtitles in either language line
+    up with the voice. count_sentences says how many sentences SlideCast sees in
+    a text, which catches a translation that sneaks a full stop into one."""
+    def check(data):
+        problem = _same_shape(data, slides, "slides")
+        if problem:
+            return problem
+        for number, (mine, theirs) in enumerate(zip(slides, data["slides"]), 1):
+            got = theirs.get("sentences") if isinstance(theirs, dict) else None
+            if not isinstance(got, list) or len(got) != len(mine["sentences"]):
+                return (f"slide {number} needs exactly {len(mine['sentences'])} sentences "
+                        f"in its sentences list")
+            for index, sentence in enumerate(got, 1):
+                if count_sentences(str(sentence)) != 1:
+                    return (f"sentence {index} of slide {number} reads as more than one "
+                            f"sentence; join it into one")
+        return None
+
+    system = TRANSLATE_SYSTEM.format(language=language)
+    return ask_json(settings, system, json.dumps({"slides": slides}, ensure_ascii=False), check)
+
+
+def translated_script(original, translated):
+    """The translation as a script, with each [show] back on its sentence."""
+    lines = []
+    for slide, done in zip(original, translated["slides"]):
+        sentences = [("[show] " * slide["steps"].count(i)) + str(s).strip()
+                     for i, s in enumerate(done["sentences"])]
+        label = str(done.get("label") or "").strip()
+        lines += [f"Slide {slide['n']}" + (f" - {label}" if label else ""), "",
+                  " ".join(sentences), ""]
+    return "\n".join(lines)
+
+
+def translate_texts(settings, texts, language):
+    """A list of strings in, the same number of strings out."""
+    def check(data):
+        problem = _same_shape(data, texts, "texts")
+        return problem or (None if all(isinstance(t, str) for t in data["texts"])
+                           else "every item in texts must be a string")
+
+    system = TRANSLATE_SYSTEM.format(language=language)
+    return ask_json(settings, system, json.dumps({"texts": texts}, ensure_ascii=False),
+                    check)["texts"]
+
+
+def translate_deck(settings, deck, language):
+    """The words on an AI-written deck's slides, translated. Kinds and the
+    number of bullets are kept from the original, so the design cannot break."""
+    fields = [{"label": s.get("label", ""), "heading": s.get("heading", ""),
+               "subheading": s.get("subheading", ""), "bullets": s.get("bullets") or []}
+              for s in deck["slides"]]
+
+    def check(data):
+        problem = _same_shape(data, fields, "slides")
+        if problem:
+            return problem
+        for number, (mine, theirs) in enumerate(zip(fields, data["slides"]), 1):
+            if not isinstance(theirs, dict) or len(theirs.get("bullets") or []) != len(mine["bullets"]):
+                return f"slide {number} needs exactly {len(mine['bullets'])} bullets"
+        return None
+
+    system = TRANSLATE_SYSTEM.format(language=language)
+    done = ask_json(settings, system, json.dumps({"slides": fields}, ensure_ascii=False), check)
+    slides = [{**original, **{k: theirs.get(k, original.get(k)) for k in
+                              ("label", "heading", "subheading", "bullets")}}
+              for original, theirs in zip(deck["slides"], done["slides"])]
+    return {**deck, "slides": slides}
